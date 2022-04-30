@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Posts on Collin&#39;s Blog</title>
+    <link>https://CrazyCollin.github.io/posts/</link>
+    <description>Recent content in Posts on Collin&#39;s Blog</description>
+    <image>
+      <url>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</url>
+      <link>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</link>
+    </image>
+    <generator>Hugo -- gohugo.io</generator>
+    <lastBuildDate>Sat, 30 Apr 2022 17:18:32 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>DNS</title>
+      <link>https://CrazyCollin.github.io/posts/dns/</link>
+      <pubDate>Sat, 30 Apr 2022 17:18:32 +0800</pubDate>
+      
+      <guid>https://CrazyCollin.github.io/posts/dns/</guid>
+      <description>https://juejin.cn/post/6918894984414363655
+  https://juejin.cn/post/6919755385330991112#heading-7
+ 域名解析协议 
+DNS层次结构  根域名服务器 顶级域名服务器 权威域名服务器 本地域名服务器  不在DNS层次结构中 是电脑解析时的默认域名服务器     DNS查询步骤 1）首先搜索浏览器的 DNS 缓存，缓存中维护一张域名与 IP 地址的对应表；
+2）若没有命中，则继续搜索操作系统的 DNS 缓存；
+3）若仍然没有命中，则操作系统将域名发送至本地域名服务器，本地域名服务器查询自己的 DNS 缓存，查找成功则返回结果（注意：主机和本地域名服务器之间的查询方式是递归查询）；
+4）若本地域名服务器的 DNS 缓存没有命中，则本地域名服务器向上级域名服务器进行查询，通过以下方式进行迭代查询（注意：本地域名服务器和其他域名服务器之间的查询方式是迭代查询，防止根域名服务器压力过大）：
+ 首先本地域名服务器向根域名服务器发起请求，根域名服务器是最高层次的，它并不会直接指明这个域名对应的 IP 地址，而是返回顶级域名服务器的地址，也就是说给本地域名服务器指明一条道路，让他去这里寻找答案 本地域名服务器拿到这个顶级域名服务器的地址后，就向其发起请求，获取权限域名服务器的地址 本地域名服务器根据权限域名服务器的地址向其发起请求，最终得到该域名对应的 IP 地址  4）本地域名服务器将得到的 IP 地址返回给操作系统，同时自己将 IP 地址缓存起来
+5）操作系统将 IP 地址返回给浏览器，同时自己也将 IP 地址缓存起来
+6）至此，浏览器就得到了域名对应的 IP 地址，并将 IP 地址缓存起来
+
+DNS解析器 进行DNS查询的主机和软件都叫做DNS解析器，用户使用的个人电脑和工作栈都属于DNS解析器。
+DNS解析器是DNS查询的第一站，其负责与发出初始请求的客户端打交道。
+解析器启动查询序列，最终将URL转换得到对应的IP地址
+
+DNS缓存 DNS缓存又称DNS解析器缓存，是由操作系统维护的临时数据库，拥有最近访问网站和其他internet域的访问记录 
+DNS缓存工作方式 在浏览器向外部发送请求之前拦截每个请求并在dns缓存中查找域名，该缓存中维护了最近的域名列表，以及dns首次发出请求时dns为其计算的域名</description>
+    </item>
+    
+  </channel>
+</rss>
