@@ -1,0 +1,3 @@
+User-agent: *
+Disallow:
+Sitemap: https://CrazyCollin.github.io/sitemap.xml
