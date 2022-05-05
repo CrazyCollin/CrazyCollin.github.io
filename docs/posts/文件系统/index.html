@@ -1,0 +1,321 @@
+<!doctype html><html lang=en dir=auto>
+<head><meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge">
+<meta name=viewport content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name=robots content="index, follow">
+<title>文件系统 | Collin's Blog</title>
+<meta name=keywords content="操作系统">
+<meta name=description content="文件系统 
+索引节点和目录项 在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理
+为了方便管理，linux给每个文件都分配了两个数据结构，索引节点和目录项，他们主要用于存储文件的元信息和目录结构。
+ 索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。 目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存  简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的
+
+软链接和硬链接 通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的
+**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的
+只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件
+软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式
+
+虚拟文件系统 目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异
+总的来说，文件系统分为三类
+ 磁盘文件系统，如ext系列都是这种文件系统 内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据 网格文件系统，访问其他主机数据的文件系统，如NFS  文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来
+
+文件存储方式 
+连续空间存储 简单来说，就是直接将文件放在磁盘连续的物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中
+连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高 
+非连续空间存储 非连续空间分配也分为两个种类：链表方式和索引方式 
+链表方式 链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，显式链接和隐式链接
+隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问
+显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大 
+索引方式 索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针
+这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）
+
+Unix中的文件存储 在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率
+
+空闲空间管理 和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理 
+空闲表法 简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个空闲表当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大 
+空闲链表法 每一个空闲块都有着一个链表指向下一个空闲块
+当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面
+优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间 
+位图法 很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理
+
+目录的存储 同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息
+通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况
+通常会将当前使用的文件目录缓存在内存中避免IO开销">
+<meta name=author content="Collin">
+<link rel=canonical href=https://CrazyCollin.github.io/posts/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/>
+<link crossorigin=anonymous href=/assets/css/stylesheet.min.ec8da366ca2fb647537ccb7a8f6fa5b4e9cd3c7a0d3171dd2d3baad1e49c8bfc.css integrity="sha256-7I2jZsovtkdTfMt6j2+ltOnNPHoNMXHdLTuq0eSci/w=" rel="preload stylesheet" as=style>
+<script defer crossorigin=anonymous src=/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5+kdJvBz5iKbt6B5PJI=" onload=hljs.initHighlightingOnLoad()></script>
+<link rel=icon href=https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E>
+<link rel=icon type=image/png sizes=16x16 href=https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E>
+<link rel=icon type=image/png sizes=32x32 href=https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E>
+<link rel=apple-touch-icon href=https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E>
+<link rel=mask-icon href=https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E>
+<meta name=theme-color content="#2e2e33">
+<meta name=msapplication-TileColor content="#2e2e33">
+<noscript>
+<style>#theme-toggle,.top-link{display:none}</style>
+<style>@media(prefers-color-scheme:dark){:root{--theme:rgb(29, 30, 32);--entry:rgb(46, 46, 51);--primary:rgb(218, 218, 219);--secondary:rgb(155, 156, 157);--tertiary:rgb(65, 66, 68);--content:rgb(196, 196, 197);--hljs-bg:rgb(46, 46, 51);--code-bg:rgb(55, 56, 62);--border:rgb(51, 51, 51)}.list{background:var(--theme)}.list:not(.dark)::-webkit-scrollbar-track{background:0 0}.list:not(.dark)::-webkit-scrollbar-thumb{border-color:var(--theme)}}</style>
+</noscript>
+<script type=application/javascript>var doNotTrack=!1;doNotTrack||(function(a,e,f,g,b,c,d){a.GoogleAnalyticsObject=b,a[b]=a[b]||function(){(a[b].q=a[b].q||[]).push(arguments)},a[b].l=1*new Date,c=e.createElement(f),d=e.getElementsByTagName(f)[0],c.async=1,c.src=g,d.parentNode.insertBefore(c,d)}(window,document,'script','https://www.google-analytics.com/analytics.js','ga'),ga('create','UA-123-45','auto'),ga('send','pageview'))</script><meta property="og:title" content="文件系统">
+<meta property="og:description" content="文件系统 
+索引节点和目录项 在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理
+为了方便管理，linux给每个文件都分配了两个数据结构，索引节点和目录项，他们主要用于存储文件的元信息和目录结构。
+ 索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。 目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存  简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的
+
+软链接和硬链接 通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的
+**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的
+只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件
+软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式
+
+虚拟文件系统 目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异
+总的来说，文件系统分为三类
+ 磁盘文件系统，如ext系列都是这种文件系统 内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据 网格文件系统，访问其他主机数据的文件系统，如NFS  文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来
+
+文件存储方式 
+连续空间存储 简单来说，就是直接将文件放在磁盘连续的物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中
+连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高 
+非连续空间存储 非连续空间分配也分为两个种类：链表方式和索引方式 
+链表方式 链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，显式链接和隐式链接
+隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问
+显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大 
+索引方式 索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针
+这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）
+
+Unix中的文件存储 在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率
+
+空闲空间管理 和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理 
+空闲表法 简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个空闲表当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大 
+空闲链表法 每一个空闲块都有着一个链表指向下一个空闲块
+当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面
+优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间 
+位图法 很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理
+
+目录的存储 同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息
+通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况
+通常会将当前使用的文件目录缓存在内存中避免IO开销">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://CrazyCollin.github.io/posts/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/"><meta property="og:image" content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E"><meta property="article:section" content="posts">
+<meta property="article:published_time" content="2022-05-05T17:13:22+08:00">
+<meta property="article:modified_time" content="2022-05-05T17:13:22+08:00"><meta property="og:site_name" content="ExampleSite">
+<meta name=twitter:card content="summary_large_image">
+<meta name=twitter:image content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E">
+<meta name=twitter:title content="文件系统">
+<meta name=twitter:description content="文件系统 
+索引节点和目录项 在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理
+为了方便管理，linux给每个文件都分配了两个数据结构，索引节点和目录项，他们主要用于存储文件的元信息和目录结构。
+ 索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。 目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存  简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的
+
+软链接和硬链接 通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的
+**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的
+只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件
+软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式
+
+虚拟文件系统 目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异
+总的来说，文件系统分为三类
+ 磁盘文件系统，如ext系列都是这种文件系统 内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据 网格文件系统，访问其他主机数据的文件系统，如NFS  文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来
+
+文件存储方式 
+连续空间存储 简单来说，就是直接将文件放在磁盘连续的物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中
+连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高 
+非连续空间存储 非连续空间分配也分为两个种类：链表方式和索引方式 
+链表方式 链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，显式链接和隐式链接
+隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问
+显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大 
+索引方式 索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针
+这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）
+
+Unix中的文件存储 在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率
+
+空闲空间管理 和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理 
+空闲表法 简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个空闲表当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大 
+空闲链表法 每一个空闲块都有着一个链表指向下一个空闲块
+当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面
+优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间 
+位图法 很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理
+
+目录的存储 同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息
+通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况
+通常会将当前使用的文件目录缓存在内存中避免IO开销">
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":2,"name":"Posts","item":"https://CrazyCollin.github.io/posts/"},{"@type":"ListItem","position":3,"name":"文件系统","item":"https://CrazyCollin.github.io/posts/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/"}]}</script>
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BlogPosting","headline":"文件系统","name":"文件系统","description":"文件系统 \n索引节点和目录项 在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理\n为了方便管理，linux给每个文件都分配了两个数据结构，索引节点和目录项，他们主要用于存储文件的元信息和目录结构。\n 索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。 目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存  简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的\n\n软链接和硬链接 通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的\n**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的\n只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件\n软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式\n\n虚拟文件系统 目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异\n总的来说，文件系统分为三类\n 磁盘文件系统，如ext系列都是这种文件系统 内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据 网格文件系统，访问其他主机数据的文件系统，如NFS  文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来\n\n文件存储方式 \n连续空间存储 简单来说，就是直接将文件放在磁盘连续的物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中\n连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高 \n非连续空间存储 非连续空间分配也分为两个种类：链表方式和索引方式 \n链表方式 链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，显式链接和隐式链接\n隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问\n显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大 \n索引方式 索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针\n这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）\n\nUnix中的文件存储 在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率\n\n空闲空间管理 和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理 \n空闲表法 简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个空闲表当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大 \n空闲链表法 每一个空闲块都有着一个链表指向下一个空闲块\n当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面\n优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间 \n位图法 很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理\n\n目录的存储 同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息\n通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况\n通常会将当前使用的文件目录缓存在内存中避免IO开销","keywords":["操作系统"],"articleBody":"\n文件系统 \n索引节点和目录项 在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理\n为了方便管理，linux给每个文件都分配了两个数据结构，索引节点和目录项，他们主要用于存储文件的元信息和目录结构。\n 索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。 目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存  简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的\n\n软链接和硬链接 通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的\n**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的\n只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件\n软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式\n\n虚拟文件系统 目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异\n总的来说，文件系统分为三类\n 磁盘文件系统，如ext系列都是这种文件系统 内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据 网格文件系统，访问其他主机数据的文件系统，如NFS  文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来\n\n文件存储方式 \n连续空间存储 简单来说，就是直接将文件放在磁盘连续的物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中\n连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高 \n非连续空间存储 非连续空间分配也分为两个种类：链表方式和索引方式 \n链表方式 链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，显式链接和隐式链接\n隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问\n显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大 \n索引方式 索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针\n这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）\n\nUnix中的文件存储 在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率\n\n空闲空间管理 和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理 \n空闲表法 简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个空闲表当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大 \n空闲链表法 每一个空闲块都有着一个链表指向下一个空闲块\n当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面\n优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间 \n位图法 很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理\n\n目录的存储 同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息\n通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况\n通常会将当前使用的文件目录缓存在内存中避免IO开销\n","wordCount":"48","inLanguage":"en","datePublished":"2022-05-05T17:13:22+08:00","dateModified":"2022-05-05T17:13:22+08:00","author":[{"@type":"Person","name":"Collin"}],"mainEntityOfPage":{"@type":"WebPage","@id":"https://CrazyCollin.github.io/posts/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/"},"publisher":{"@type":"Organization","name":"Collin's Blog","logo":{"@type":"ImageObject","url":"https://CrazyCollin.github.io/%3Clink%20/%20abs%20url%3E"}}}</script>
+</head>
+<body id=top>
+<script>localStorage.getItem("pref-theme")==="dark"?document.body.classList.add('dark'):localStorage.getItem("pref-theme")==="light"?document.body.classList.remove('dark'):window.matchMedia('(prefers-color-scheme: dark)').matches&&document.body.classList.add('dark')</script>
+<header class=header>
+<nav class=nav>
+<div class=logo>
+<a href=https://CrazyCollin.github.io accesskey=h title="Collin's Blog (Alt + H)">Collin's Blog</a>
+<span class=logo-switches>
+<button id=theme-toggle accesskey=t title="(Alt + T)"><svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg><svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
+</span>
+</div>
+<ul id=menu>
+<li>
+<a href=https://CrazyCollin.github.io/posts/ title=posts>
+<span>posts</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/categories/ title=categories>
+<span>categories</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/tags/ title=tags>
+<span>tags</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/archives/ title=archives>
+<span>archives</span>
+</a>
+</li>
+</ul>
+</nav>
+</header>
+<main class=main>
+<article class=post-single>
+<header class=post-header>
+<div class=breadcrumbs><a href=https://CrazyCollin.github.io>Home</a>&nbsp;»&nbsp;<a href=https://CrazyCollin.github.io/posts/>Posts</a></div>
+<h1 class=post-title>
+文件系统
+</h1>
+<div class=post-meta><span title="2022-05-05 17:13:22 +0800 CST">May 5, 2022</span>&nbsp;·&nbsp;1 min&nbsp;·&nbsp;Collin&nbsp;|&nbsp;<a href=https://github.com/%3cpath_to_repo%3e/content/posts/%e6%96%87%e4%bb%b6%e7%b3%bb%e7%bb%9f.md rel="noopener noreferrer" target=_blank>Suggest Changes</a>
+</div>
+</header> <div class=toc>
+<details open>
+<summary accesskey=c title="(Alt + C)">
+<span class=details>Table of Contents</span>
+</summary>
+<div class=inner><ul>
+<li>
+<a href=#%e6%96%87%e4%bb%b6%e7%b3%bb%e7%bb%9f aria-label=文件系统>文件系统</a><ul>
+<li>
+<a href=#%e7%b4%a2%e5%bc%95%e8%8a%82%e7%82%b9%e5%92%8c%e7%9b%ae%e5%bd%95%e9%a1%b9 aria-label=索引节点和目录项>索引节点和目录项</a></li>
+<li>
+<a href=#%e8%bd%af%e9%93%be%e6%8e%a5%e5%92%8c%e7%a1%ac%e9%93%be%e6%8e%a5 aria-label=软链接和硬链接>软链接和硬链接</a></li>
+<li>
+<a href=#%e8%99%9a%e6%8b%9f%e6%96%87%e4%bb%b6%e7%b3%bb%e7%bb%9f aria-label=虚拟文件系统>虚拟文件系统</a></li>
+<li>
+<a href=#%e6%96%87%e4%bb%b6%e5%ad%98%e5%82%a8%e6%96%b9%e5%bc%8f aria-label=文件存储方式>文件存储方式</a><ul>
+<li>
+<a href=#%e8%bf%9e%e7%bb%ad%e7%a9%ba%e9%97%b4%e5%ad%98%e5%82%a8 aria-label=连续空间存储>连续空间存储</a></li>
+<li>
+<a href=#%e9%9d%9e%e8%bf%9e%e7%bb%ad%e7%a9%ba%e9%97%b4%e5%ad%98%e5%82%a8 aria-label=非连续空间存储>非连续空间存储</a><ul>
+<li>
+<a href=#%e9%93%be%e8%a1%a8%e6%96%b9%e5%bc%8f aria-label=链表方式>链表方式</a></li>
+<li>
+<a href=#%e7%b4%a2%e5%bc%95%e6%96%b9%e5%bc%8f aria-label=索引方式>索引方式</a></li></ul>
+</li>
+<li>
+<a href=#unix%e4%b8%ad%e7%9a%84%e6%96%87%e4%bb%b6%e5%ad%98%e5%82%a8 aria-label=Unix中的文件存储>Unix中的文件存储</a></li></ul>
+</li>
+<li>
+<a href=#%e7%a9%ba%e9%97%b2%e7%a9%ba%e9%97%b4%e7%ae%a1%e7%90%86 aria-label=空闲空间管理>空闲空间管理</a><ul>
+<li>
+<a href=#%e7%a9%ba%e9%97%b2%e8%a1%a8%e6%b3%95 aria-label=空闲表法>空闲表法</a></li>
+<li>
+<a href=#%e7%a9%ba%e9%97%b2%e9%93%be%e8%a1%a8%e6%b3%95 aria-label=空闲链表法>空闲链表法</a></li>
+<li>
+<a href=#%e4%bd%8d%e5%9b%be%e6%b3%95 aria-label=位图法>位图法</a></li></ul>
+</li>
+<li>
+<a href=#%e7%9b%ae%e5%bd%95%e7%9a%84%e5%ad%98%e5%82%a8 aria-label=目录的存储>目录的存储</a>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</details>
+</div>
+<div class=post-content><p><a name=QP8Rl></a></p>
+<h1 id=文件系统>文件系统<a hidden class=anchor aria-hidden=true href=#文件系统>#</a></h1>
+<p><a name=zkOFG></a></p>
+<h2 id=索引节点和目录项>索引节点和目录项<a hidden class=anchor aria-hidden=true href=#索引节点和目录项>#</a></h2>
+<p>在linux中一切皆文件，包括普通的文件，目录，块设备，socket，管道等也是文件，这些都需要统一的文件系统来管理<br>为了方便管理，linux给每个文件都分配了两个数据结构，<strong>索引节点和目录项，他们主要用于存储文件的元信息和目录结构。</strong></p>
+<ul>
+<li>索引节点（inode），用于记录文件的元数据，比如inode编号，文件大小，访问权限，修改日期，**文件在磁盘中的存储等。**索引节点和文件一一对应，跟文件系统一样，都会被持久化存储到磁盘中。</li>
+<li>目录项（dentry），记录文件的名字，索引节点指针以及和其他目录项的关联关系。<strong>多个关联的目录项就构成了文件系统的目录结构。不同于索引节点，目录项是由内核维护的一个内存数据结构，所以通常也被称为目录项缓存</strong></li>
+</ul>
+<p>简单的来说，索引节点是文件存在的唯一标识，而目录项维护的就是文件系统的树状结构，目录项和索引节点的关系是多对一的</p>
+<p><a name=m5qIL></a></p>
+<h2 id=软链接和硬链接>软链接和硬链接<a hidden class=anchor aria-hidden=true href=#软链接和硬链接>#</a></h2>
+<p>通常我们给某个文件取一个别名，那么就可以利用软链接和硬链接来实现，他们都是特殊的文件，但是实现方式也是不太相同的</p>
+<p>**硬链接指的是多个目录项中的索引节点都指向来同一个文件，也就是同一个inode，**但是inode是不可能跨越文件系统的，所以硬链接也是不可以跨越文件系统的<br><strong>只有删除文件的所有硬链接以及源文件的时候，系统才会彻底删除该文件</strong></p>
+<p><strong>软链接指的则是相当于重新创建一个文件，而这个文件拥有着独立的inode，并且这个新的inode指向原来的inode，删除源文件会影响软链接文件的访问，有点类似于win中的文件快捷方式</strong></p>
+<p><a name=QVePm></a></p>
+<h2 id=虚拟文件系统>虚拟文件系统<a hidden class=anchor aria-hidden=true href=#虚拟文件系统>#</a></h2>
+<p><strong>目录项，索引节点，逻辑块以及超级块构成来linux文件系统的四大基本要素</strong>，对于不同的文件系统，其提供给用户的接口也有所不同，但对于操作系统而言肯定是希望提供一个统一的接口供用户调用，<strong>于是就在用户层和文件系统中间引入了中间层，也叫做虚拟文件系统VFS，我们只需要了解VFS提供的统一即可，这样就屏蔽了不同文件系统的差异</strong></p>
+<p><img loading=lazy src="https://cdn.nlark.com/yuque/0/2022/png/25605701/1651737949342-102c3cf6-37d3-4573-8b56-2aa50417a160.png#clientId=ufbd7f8b9-aa9d-4&crop=0&crop=0&crop=1&crop=1&from=paste&height=631&id=u0cba88f8&margin=%5Bobject%20Object%5D&name=image.png&originHeight=1262&originWidth=962&originalType=binary&ratio=1&rotation=0&showTitle=false&size=388770&status=done&style=none&taskId=u7944ea37-68dc-43f2-87dc-7eb59102e2e&title=&width=481" alt=image.png>
+</p>
+<p>总的来说，文件系统分为三类</p>
+<ul>
+<li><strong>磁盘文件系统，如ext系列都是这种文件系统</strong></li>
+<li><strong>内存文件系统，此类数据存储在内存当中，读写此类文件实际上读写内存中的数据</strong></li>
+<li><strong>网格文件系统，访问其他主机数据的文件系统，如NFS</strong></li>
+</ul>
+<p><strong>文件系统首先需要挂载到VFS目录树中的某个子目录（挂载点）才能够正常使用，比如在linux启动的时候，会把系统挂载到根目录，再将其他磁盘分区，/proc文件系统，/sys文件系统，NFS等等都挂载进来</strong></p>
+<p><a name=uxOau></a></p>
+<h2 id=文件存储方式>文件存储方式<a hidden class=anchor aria-hidden=true href=#文件存储方式>#</a></h2>
+<p><a name=rhVRA></a></p>
+<h3 id=连续空间存储>连续空间存储<a hidden class=anchor aria-hidden=true href=#连续空间存储>#</a></h3>
+<p>简单来说，就是直接将文件放在磁盘<strong>连续的</strong>物理空间当中，这种分配方式下，读写效率非常高，一次读就能够读出整个文件，其将自己文件起始块的位置和整个文件系统的长度都存储在inode当中<br>连续空间分配有着很严重的缺点，那就是磁盘空间碎片问题和文件长度非常难扩展，具体涉及到文件在磁盘中的移动，代价非常高
+<a name=Ui6DV></a></p>
+<h3 id=非连续空间存储>非连续空间存储<a hidden class=anchor aria-hidden=true href=#非连续空间存储>#</a></h3>
+<p>非连续空间分配也分为两个种类：链表方式和索引方式
+<a name=xEha2></a></p>
+<h4 id=链表方式>链表方式<a hidden class=anchor aria-hidden=true href=#链表方式>#</a></h4>
+<p>链表方式主要就是在每个数据块中存储着下一个数据块地址的指针，这样就能够实现随机存储，顺序访问，同时也能够避免磁盘中的空间碎片，同时链表方式也可以分为两种方式，<strong>显式链接和隐式链接</strong><br><strong>隐式链接主要就是只将数据块第一块和最后一块的地址存在文件头当中，对于文件数据块的访问是从第一块磁盘块开始的，不利于随机访问</strong><br><strong>显式链接主要就是将每一块数据块的指针显式的存在一张链接表当中，也叫做文件分配表（FAT），但是FAT对于大磁盘而言不太友好，因为其在大磁盘中占用空间较大</strong>
+<a name=SKjPG></a></p>
+<h4 id=索引方式>索引方式<a hidden class=anchor aria-hidden=true href=#索引方式>#</a></h4>
+<p>索引的分配方式实际上是将一个数据块中全部存储着指向文件数据块的指针<br>这样分配也有着一定的问题（指一个文件分配一个索引数据块），通常索引方式去分配文件的数据块的时候，通常是多级索引（一个索引数据块指向多个数据索引块），或者是链式索引（分配多个索引数据块，之间通过链表的方式相连）</p>
+<p><a name=SuLuG></a></p>
+<h3 id=unix中的文件存储>Unix中的文件存储<a hidden class=anchor aria-hidden=true href=#unix中的文件存储>#</a></h3>
+<p>在早期unix中，文件的存储实际上是根据文件的大小而选择不同的策略来存储的，例如像一个很小的文件，就没必要为其分配其他的数据结构以支持其存储了，只需要进行连续地址分配即可，同时对于大文件，考虑非连续地址分配的方式，以便于读写和对文件进行调整，进而有着更高的效率</p>
+<p><a name=MKaeb></a></p>
+<h2 id=空闲空间管理>空闲空间管理<a hidden class=anchor aria-hidden=true href=#空闲空间管理>#</a></h2>
+<p>和文件存储的数据块一样，磁盘中没用的空闲块也需要进行管理
+<a name=lcW4U></a></p>
+<h3 id=空闲表法>空闲表法<a hidden class=anchor aria-hidden=true href=#空闲表法>#</a></h3>
+<p>简单粗暴，直接将空闲块号和与之相对应的空闲块个数存储在一个<strong>空闲表</strong>当中，当请求分配存储空间的时候，就需要遍历这张空闲表，找出复合要求的存储空间，缺点就是效率会比较低，同时对于大量碎片的话，空闲表本身占用的空间也会很大
+<a name=evT3C></a></p>
+<h3 id=空闲链表法>空闲链表法<a hidden class=anchor aria-hidden=true href=#空闲链表法>#</a></h3>
+<p>每一个空闲块都有着一个链表指向下一个空闲块<br>当创建文件的时候就直接从链表头上取下，回收则直接将空闲块接在链表头上面<br>优点就是简单方便操作，缺点就是不支持随机访问，IO操作多，效率底，同时指针也消耗着一定的存储空间
+<a name=WEJx5></a></p>
+<h3 id=位图法>位图法<a hidden class=anchor aria-hidden=true href=#位图法>#</a></h3>
+<p>很简单，直接用二进制的一位来表示一个数据块是否可用，有点类似于布隆过滤器，这种方法在linux中不仅用于对空闲块的管理，还用于对inode空闲块的管理</p>
+<p><a name=VWo9T></a></p>
+<h2 id=目录的存储>目录的存储<a hidden class=anchor aria-hidden=true href=#目录的存储>#</a></h2>
+<p>同一般的文件存储不同，目录文件的块中里面存储的是目录里面一项一项的文件信息<br>通常在块中保存目录的格式改为**哈希表，**像ext就采用哈希表，对文件名进行哈希运算，将哈希值保存起来，如果需要查找目录下的文件名，那么对文件名直接取哈希，如果能匹配上则说明此文件信息在对应的块当中，不过需要处理哈希冲突的情况<br>通常会将当前使用的文件目录缓存在内存中避免IO开销<br><img loading=lazy src="https://cdn.nlark.com/yuque/0/2022/png/25605701/1651741869272-a7fe6c7f-c207-4dd5-97c2-87c2e1513d08.png#clientId=ufbd7f8b9-aa9d-4&crop=0&crop=0&crop=1&crop=1&from=paste&height=441&id=ubca0021d&margin=%5Bobject%20Object%5D&name=image.png&originHeight=882&originWidth=1427&originalType=binary&ratio=1&rotation=0&showTitle=false&size=1243383&status=done&style=none&taskId=u25461f73-b9bb-42ad-aa09-9dc224594ba&title=&width=713.5" alt=image.png>
+</p>
+</div>
+<footer class=post-footer>
+<ul class=post-tags>
+<li><a href=https://CrazyCollin.github.io/tags/%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F/>操作系统</a></li>
+</ul>
+<nav class=paginav>
+<a class=next href=https://CrazyCollin.github.io/posts/%E5%B9%B6%E5%8F%91%E7%9A%84%E5%8F%AF%E8%BE%BE%E6%80%A7%E5%88%86%E6%9E%90/>
+<span class=title>Next Page »</span>
+<br>
+<span>并发的可达性分析</span>
+</a>
+</nav>
+</footer>
+</article>
+</main>
+<footer class=footer>
+<span>&copy; 2022 <a href=https://CrazyCollin.github.io>Collin's Blog</a></span>
+<span>
+Powered by
+<a href=https://gohugo.io/ rel="noopener noreferrer" target=_blank>Hugo</a> &
+        <a href=https://git.io/hugopapermod rel=noopener target=_blank>PaperMod</a>
+</span>
+</footer>
+<a href=#top aria-label="go to top" title="Go to Top (Alt + G)" class=top-link id=top-link accesskey=g><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentcolor"><path d="M12 6H0l6-6z"/></svg>
+</a>
+<script>let menu=document.getElementById('menu');menu&&(menu.scrollLeft=localStorage.getItem("menu-scroll-position"),menu.onscroll=function(){localStorage.setItem("menu-scroll-position",menu.scrollLeft)}),document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener("click",function(b){b.preventDefault();var a=this.getAttribute("href").substr(1);window.matchMedia('(prefers-reduced-motion: reduce)').matches?document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView():document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView({behavior:"smooth"}),a==="top"?history.replaceState(null,null," "):history.pushState(null,null,`#${a}`)})})</script>
+<script>var mybutton=document.getElementById("top-link");window.onscroll=function(){document.body.scrollTop>800||document.documentElement.scrollTop>800?(mybutton.style.visibility="visible",mybutton.style.opacity="1"):(mybutton.style.visibility="hidden",mybutton.style.opacity="0")}</script>
+<script>document.getElementById("theme-toggle").addEventListener("click",()=>{document.body.className.includes("dark")?(document.body.classList.remove('dark'),localStorage.setItem("pref-theme",'light')):(document.body.classList.add('dark'),localStorage.setItem("pref-theme",'dark'))})</script>
+</body>
+</html>
