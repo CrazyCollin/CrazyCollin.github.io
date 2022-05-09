@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>系统设计 on Collin&#39;s Blog</title>
+    <link>https://CrazyCollin.github.io/categories/%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/</link>
+    <description>Recent content in 系统设计 on Collin&#39;s Blog</description>
+    <image>
+      <url>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</url>
+      <link>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</link>
+    </image>
+    <generator>Hugo -- gohugo.io</generator>
+    <lastBuildDate>Mon, 09 May 2022 19:04:09 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/categories/%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>如何设计一个RPC框架</title>
+      <link>https://CrazyCollin.github.io/posts/%E5%A6%82%E4%BD%95%E8%AE%BE%E8%AE%A1%E4%B8%80%E4%B8%AArpc%E6%A1%86%E6%9E%B6/</link>
+      <pubDate>Mon, 09 May 2022 19:04:09 +0800</pubDate>
+      
+      <guid>https://CrazyCollin.github.io/posts/%E5%A6%82%E4%BD%95%E8%AE%BE%E8%AE%A1%E4%B8%80%E4%B8%AArpc%E6%A1%86%E6%9E%B6/</guid>
+      <description>如何设计一个RPC框架 
+简单介绍 **RPC（Remote Procedure Call）远程过程调用，**原理很简单，就是在不同的应用程序抑或是机器之间调用服务端所提供的服务，这整个过程对服务调用方来说就是透明的，这个过程可以像调用本地服务一样简单高效，不需要关心服务是如何调用的等一系列问题 
+如何设计 首先服务调用，那肯定是需要和服务提供方进行通信的，如何通信也有着不同的选择方式，像HTTP协议抑或是TCP协议，这就是通信方式的选择
+其次就是调用信息的编码协议，我们可以直接用JSON来承载我们的调用信息，当然JSON所占用的字节数比较多，效率也就比较低下，这时候我们就可以选择效率更高的序列化编码协议，像谷歌的Protobuf这种二进制编码协议，效率更高
+那么到了这里其实我们已经可以完成客户端对服务端的RPC调用了，但往更深了想，我们客户端调用服务，那么就必须在本地维护我们的服务提供方的信息，从而完成我们服务的调用，那么维护的这个信息是和客户端耦合
+的，其次信息的更新也是不方便的，所以基于此，我们往往就是将服务提供方的信息放在另外一个注册中心，在注册中心维护着服务提供方的各种详细信息，包括像服务提供地址，暴露的服务和方法等，客户端和服务端只需要知道注册中心即可，这就是我们的服务发现
+其次，当我们的流量很大的时候，一个服务提供方肯定是不够能力处理流量很大的时候的请求的，我们的服务提供方就需要扩容，我们RPC调用的过程对客户端来说就是透明的，那么这就涉及到我们的负载均衡了，通过一定的负载均衡算法将客户端的请求打在不同的机器上面，服务提供方只需要给客户端返回处理消息即可
+那么到这个时候，我们整个RPC调用的逻辑就清晰了，客户端通过注册中心拿到服务提供方的信息来进行远程调用，但是最后处理请求的时候也有可能会出问题，这就涉及到我们的服务治理了，RPC调用应该是高可用的，有时候由于不可抗力因素，导致客户端调用的那个服务提供方出现宕机，那么这个调用就说明失败了，我们需要及时返回调用失败信息，这就涉及我们的**超时控制，**其次就是要将这个服务提供方从注册中心中剔除掉，防止我们下次调用还打在这个服务提供方上
+那么到这里就很清晰明了了，简单的RPC框架设计无非就是以下几部分的考量
+ 传输协议-&amp;gt;编码协议-&amp;gt;服务注册与发现-&amp;gt;服务治理
+ 
+整体设计 首先感谢极客兔兔，让我有了机会写了这个项目，让我对rpc有了整体上的理解
+首先我们考虑到实现RPC框架的几个考量，首先就是我们的传输协议和编码协议的制定，对于传输协议，我们采用了TCP协议来承载调用整个过程，消息编码协议方面选择的是golang自带的gob协议，这也是一种二进制编码协议，当然这个编码协议不能实现跨语言调用，因为gob协议是go独有的，后期有时间的话我会把protobuf协议给整合一下
+整体上，我们实现三个主要模块：客户端，服务端，注册中心。
+ 客户端部分我们集成了**服务发现接口，**可以根据不同的需要整合不同的服务发现策略  服务发现模块是嵌在客户端里面的，包含了服务注册中心的地址，并维护一个超时时间，默认每次从本地拿服务列表，如超时则直接从注册中心获取 客户端维护一个已建立连接的client列表，复用连接以减少资源消耗 维护一个负载均衡策略标识位，实际负载均衡算法由服务发现模块实现   服务端部分我们 注册中心维护一个服务提供方列表，将其地址与上次更新时间记录下来，每次处理客户端或者服务端请求的时候更新列表  注册中心和客户端，服务端之间的通信是通过http协议交流的，主要是将服务器列表放入请求头里 心跳连接的设计主要就是每个服务端起一个协程，起一个打点器定时发送http请求给注册中心，从而更新服务端列表中的时间，心跳连接循环时间要小于超时时间避免误判服务器失活 维护一个互斥锁防止并发更新服务器注册列表出现问题    
+通信过程 首先对于客户端来说，整个服务调用过程是异步的，调用成功或者失败都会异步通知客户端
+对于客户端调用来说，所必须要的信息有：服务方法名，服务方法参数，这整个进行调用过程对客户端是透明的
+对于这些信息，我们进行必要的封装，设一个结构体Call封装调用参数
+1 2 3 4 5 6 7 8  type Call struct { Seq uint64 ServiceMethod string Args interface{} Reply interface{} Error error Done chan *Call }   对于透明化调用，主要就是服务发现模块选取可用实例，通过client已经建立的连接发送消息，整个过程都是异步的，其中Done是请求完成后进行异步通知调用用的，用于通知此条请求已经处理</description>
+    </item>
+    
+  </channel>
+</rss>
