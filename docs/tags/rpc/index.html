@@ -96,7 +96,7 @@ RPC
 对于这些信息，我们进行必要的封装，设一个结构体Call封装调用参数
 1 2 3 4 5 6 7 8 type Call struct { Seq uint64 ServiceMethod string Args interface{} Reply interface{} Error error Done chan *Call } 对于透明化调用，主要就是服务发现模块选取可用实例，通过client已经建立的连接发送消息，整个过程都是异步的，其中Done是请求完成后进行异步通知调用用的，用于通知此条请求已经处理...</p>
 </div>
-<footer class=entry-footer><span title="2022-05-09 19:04:09 +0800 CST">May 9, 2022</span>&nbsp;·&nbsp;1 min&nbsp;·&nbsp;Collin</footer>
+<footer class=entry-footer><span title="2022-05-09 19:04:09 +0800 CST">May 9, 2022</span>&nbsp;·&nbsp;Collin</footer>
 <a class=entry-link aria-label="post link to 如何设计一个RPC框架" href=https://CrazyCollin.github.io/posts/%E5%A6%82%E4%BD%95%E8%AE%BE%E8%AE%A1%E4%B8%80%E4%B8%AArpc%E6%A1%86%E6%9E%B6/></a>
 </article>
 </main>

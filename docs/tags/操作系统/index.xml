@@ -9,7 +9,29 @@
       <link>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</link>
     </image>
     <generator>Hugo -- gohugo.io</generator>
-    <lastBuildDate>Thu, 05 May 2022 17:13:22 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/tags/%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F/index.xml" rel="self" type="application/rss+xml" />
+    <lastBuildDate>Tue, 10 May 2022 23:39:49 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/tags/%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>IO网络模型</title>
+      <link>https://CrazyCollin.github.io/posts/io%E7%BD%91%E7%BB%9C%E6%A8%A1%E5%9E%8B/</link>
+      <pubDate>Tue, 10 May 2022 23:39:49 +0800</pubDate>
+      
+      <guid>https://CrazyCollin.github.io/posts/io%E7%BD%91%E7%BB%9C%E6%A8%A1%E5%9E%8B/</guid>
+      <description>说一说IO网络模型 
+同步阻塞IO 首先对于同步阻塞io来说，从应用程序发起读取请求，到最终数据交付给进程，整个过程中进程是处于挂起的状态，当然这也有个优点：cpu可以处理其他进程，提高了进程的利用率。
+等到内核数据缓冲区中数据准备好的时候，产生io中断通知内核数据已经准备好，内核响应中断，唤醒对应因为等待数据而挂起的进程，进程开始占用cpu时间将数据从内核缓冲区拷贝至用户态缓冲区中，最后进程来处理数据
+**值得注意的是，从开始调用读取数据，再到开始处理数据，整个进程实际上是阻塞在这个地方的，**当然这种io模型对于高并发的状况来说的话是很不利的，这意味着假如1万个请求过来，结果全部阻塞在第一个请求后面，这样的性能就非常差了
+
+同步非阻塞IO 和同步阻塞io有点类似，区别就是对cpu时间的占用方面有差别，进程通过自身用户态的循环询问，也就是循环进行系统调用，来查看内核数据缓冲区的数据是否准备好，当然这个时候进程同样可以做其他的事情，这个过程会是持续占用cpu运行时间的，所以循环的进行系统调用（不停的进行用户态和内核态的切换），降低了cpu的利用率，相比较于阻塞io的好处就是能在等待过程中处理进程的其他事件
+
+IO多路复用 通过阻塞io和非阻塞io，我们发现阻塞io会造成并发请求的串行化处理，而非阻塞io则会造成cpu资源的浪费，于是诞生了io多路复用技术，多路复用技术其实是运用于通信方向的，多路信号同时复用同一个信道。网络部分也有运用，例如http2.0的多路复用技术
+和非阻塞io不同的是，进程将需要监控的文件的文件描述符直接通过系统调用传给内核，直接通过内核来实现对所需数据是否准备好的监控，内核可以同时监控多个文件描述符，当文件描述符中有io读写操作时再通过内核进行返回通知对应进程，这也使得并发请求的高效处理成为了可能
+
+select select调用通过传入一个含有文件描述符的集合，请求内核对对应的文件描述符进行监控，要注意的是，这个文件描述符集合是通过拷贝的方式传入的，会有一定的cpu资源损耗，同样，对于文件描述符集合中发生了io读写操作之后，内核返回给进程的同样是一个集合，相当于只通知进程有事件发生，但是不知道是哪一个，这就需要进程在用户态遍历集合找出准备好数据的文件描述符。对于少量的请求处理是可以的，但是对于像C10K这种问题而言，一次通知将遍历大量文件描述符
+对于select而言，有着以下几个缺点：
+ linux对select传入的文件描述符的大小有限制，一般是不超过1024个的，这也就是说能够处理的请求有限 对于文件描述符集合的拷贝部分是由用户空间拷贝至内核空间的，会有cpu资源的损耗 内核不能够精确通知进程哪一个文件描述符就绪，需要进程自己遍历集合   poll 相比较于select，取消了传入文件描述符的数量限制，但依旧没有解决其他两个问题 
+epoll 待更。。。</description>
+    </item>
+    
     <item>
       <title>文件系统</title>
       <link>https://CrazyCollin.github.io/posts/%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F/</link>
