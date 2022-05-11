@@ -1,0 +1,125 @@
+<!doctype html><html lang=en dir=auto>
+<head><meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge">
+<meta name=viewport content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name=robots content="index, follow">
+<title>Redis | Collin's Blog</title>
+<meta name=keywords content>
+<meta name=description content="ExampleSite description">
+<meta name=author content="Me">
+<link rel=canonical href=https://CrazyCollin.github.io/categories/redis/>
+<link crossorigin=anonymous href=/assets/css/stylesheet.min.ec8da366ca2fb647537ccb7a8f6fa5b4e9cd3c7a0d3171dd2d3baad1e49c8bfc.css integrity="sha256-7I2jZsovtkdTfMt6j2+ltOnNPHoNMXHdLTuq0eSci/w=" rel="preload stylesheet" as=style>
+<link rel=icon href=https://CrazyCollin.github.io/static/favicon.ico>
+<link rel=icon type=image/png sizes=16x16 href=https://CrazyCollin.github.io/favicon-16x16.png>
+<link rel=icon type=image/png sizes=32x32 href=https://CrazyCollin.github.io/favicon-32x32.png>
+<link rel=apple-touch-icon href=https://CrazyCollin.github.io/apple-touch-icon.png>
+<link rel=mask-icon href=https://CrazyCollin.github.io/safari-pinned-tab.svg>
+<meta name=theme-color content="#2e2e33">
+<meta name=msapplication-TileColor content="#2e2e33">
+<link rel=alternate type=application/rss+xml href=https://CrazyCollin.github.io/categories/redis/index.xml>
+<noscript>
+<style>#theme-toggle,.top-link{display:none}</style>
+<style>@media(prefers-color-scheme:dark){:root{--theme:rgb(29, 30, 32);--entry:rgb(46, 46, 51);--primary:rgb(218, 218, 219);--secondary:rgb(155, 156, 157);--tertiary:rgb(65, 66, 68);--content:rgb(196, 196, 197);--hljs-bg:rgb(46, 46, 51);--code-bg:rgb(55, 56, 62);--border:rgb(51, 51, 51)}.list{background:var(--theme)}.list:not(.dark)::-webkit-scrollbar-track{background:0 0}.list:not(.dark)::-webkit-scrollbar-thumb{border-color:var(--theme)}}</style>
+</noscript>
+<script type=application/javascript>var doNotTrack=!1;doNotTrack||(function(a,e,f,g,b,c,d){a.GoogleAnalyticsObject=b,a[b]=a[b]||function(){(a[b].q=a[b].q||[]).push(arguments)},a[b].l=1*new Date,c=e.createElement(f),d=e.getElementsByTagName(f)[0],c.async=1,c.src=g,d.parentNode.insertBefore(c,d)}(window,document,'script','https://www.google-analytics.com/analytics.js','ga'),ga('create','UA-123-45','auto'),ga('send','pageview'))</script><meta property="og:title" content="Redis">
+<meta property="og:description" content="ExampleSite description">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://CrazyCollin.github.io/categories/redis/"><meta property="og:image" content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E"><meta property="og:site_name" content="ExampleSite">
+<meta name=twitter:card content="summary_large_image">
+<meta name=twitter:image content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E">
+<meta name=twitter:title content="Redis">
+<meta name=twitter:description content="ExampleSite description">
+</head>
+<body class=list id=top>
+<script>localStorage.getItem("pref-theme")==="dark"?document.body.classList.add('dark'):localStorage.getItem("pref-theme")==="light"?document.body.classList.remove('dark'):window.matchMedia('(prefers-color-scheme: dark)').matches&&document.body.classList.add('dark')</script>
+<header class=header>
+<nav class=nav>
+<div class=logo>
+<a href=https://CrazyCollin.github.io accesskey=h title="Collin's Blog (Alt + H)">Collin's Blog</a>
+<span class=logo-switches>
+<button id=theme-toggle accesskey=t title="(Alt + T)"><svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg><svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
+</span>
+</div>
+<ul id=menu>
+<li>
+<a href=https://CrazyCollin.github.io/posts/ title=posts>
+<span>posts</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/categories/ title=categories>
+<span>categories</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/tags/ title=tags>
+<span>tags</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/archives/ title=archives>
+<span>archives</span>
+</a>
+</li>
+</ul>
+</nav>
+</header>
+<main class=main>
+<header class=page-header><div class=breadcrumbs><a href=https://CrazyCollin.github.io>Home</a>&nbsp;»&nbsp;<a href=https://CrazyCollin.github.io/categories/>Categories</a></div>
+<h1>
+Redis
+</h1>
+</header>
+<article class="post-entry tag-entry">
+<header class=entry-header>
+<h2>Redis中的基本数据类型
+</h2>
+</header>
+<div class=entry-content>
+<p>Redis中的基本数据类型
+基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。
+**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型
+同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率
+键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对
+哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针
+哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接
+当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了
+对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。
+当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：
+为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间 对于哈希表1而言，作为下一次rehash时中的to区
+渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略
+具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了
+进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小
+底层数据结构
+SDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为
+对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含"\0"的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加
+双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的
+压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销
+压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降
+所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的
+跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高
+具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位
+跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找
+跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 typedef struct zskiplistNode { //Zset 对象的元素值 sds ele; //元素权重值 double score; //后向指针 struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度 struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode; 同时对于整个跳表的数据结构，如下...</p>
+</div>
+<footer class=entry-footer><span title="2022-05-11 22:47:24 +0800 CST">May 11, 2022</span>&nbsp;·&nbsp;Collin</footer>
+<a class=entry-link aria-label="post link to Redis中的基本数据类型" href=https://CrazyCollin.github.io/posts/redis%E4%B8%AD%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%95%B0%E6%8D%AE%E7%B1%BB%E5%9E%8B/></a>
+</article>
+</main>
+<footer class=footer>
+<span>&copy; 2022 <a href=https://CrazyCollin.github.io>Collin's Blog</a></span>
+<span>
+Powered by
+<a href=https://gohugo.io/ rel="noopener noreferrer" target=_blank>Hugo</a> &
+        <a href=https://git.io/hugopapermod rel=noopener target=_blank>PaperMod</a>
+</span>
+</footer>
+<a href=#top aria-label="go to top" title="Go to Top (Alt + G)" class=top-link id=top-link accesskey=g><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentcolor"><path d="M12 6H0l6-6z"/></svg>
+</a>
+<script>let menu=document.getElementById('menu');menu&&(menu.scrollLeft=localStorage.getItem("menu-scroll-position"),menu.onscroll=function(){localStorage.setItem("menu-scroll-position",menu.scrollLeft)}),document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener("click",function(b){b.preventDefault();var a=this.getAttribute("href").substr(1);window.matchMedia('(prefers-reduced-motion: reduce)').matches?document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView():document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView({behavior:"smooth"}),a==="top"?history.replaceState(null,null," "):history.pushState(null,null,`#${a}`)})})</script>
+<script>var mybutton=document.getElementById("top-link");window.onscroll=function(){document.body.scrollTop>800||document.documentElement.scrollTop>800?(mybutton.style.visibility="visible",mybutton.style.opacity="1"):(mybutton.style.visibility="hidden",mybutton.style.opacity="0")}</script>
+<script>document.getElementById("theme-toggle").addEventListener("click",()=>{document.body.className.includes("dark")?(document.body.classList.remove('dark'),localStorage.setItem("pref-theme",'light')):(document.body.classList.add('dark'),localStorage.setItem("pref-theme",'dark'))})</script>
+</body>
+</html>

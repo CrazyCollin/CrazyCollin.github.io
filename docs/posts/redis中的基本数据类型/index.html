@@ -1,0 +1,352 @@
+<!doctype html><html lang=en dir=auto>
+<head><meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge">
+<meta name=viewport content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name=robots content="index, follow">
+<title>Redis中的基本数据类型 | Collin's Blog</title>
+<meta name=keywords content="Redis">
+<meta name=description content="Redis中的基本数据类型 
+基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。
+**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型
+同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率
+
+键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对
+哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针
+
+哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接
+当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了
+对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。
+当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：
+ 为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间  对于哈希表1而言，作为下一次rehash时中的to区 
+渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略
+具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了
+进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小
+
+底层数据结构 
+SDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为
+对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含&#34;\0&#34;的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加 
+双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的
+
+压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销
+压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降
+所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的
+
+跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高
+具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位
+跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找
+跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层
+1 2 3 4 5 6 7 8 9 10 11 12 13 14  typedef struct zskiplistNode { //Zset 对象的元素值  sds ele; //元素权重值  double score; //后向指针  struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度  struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode;   同时对于整个跳表的数据结构，如下">
+<meta name=author content="Collin">
+<link rel=canonical href=https://CrazyCollin.github.io/posts/redis%E4%B8%AD%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%95%B0%E6%8D%AE%E7%B1%BB%E5%9E%8B/>
+<link crossorigin=anonymous href=/assets/css/stylesheet.min.ec8da366ca2fb647537ccb7a8f6fa5b4e9cd3c7a0d3171dd2d3baad1e49c8bfc.css integrity="sha256-7I2jZsovtkdTfMt6j2+ltOnNPHoNMXHdLTuq0eSci/w=" rel="preload stylesheet" as=style>
+<script defer crossorigin=anonymous src=/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5+kdJvBz5iKbt6B5PJI=" onload=hljs.initHighlightingOnLoad()></script>
+<link rel=icon href=https://CrazyCollin.github.io/static/favicon.ico>
+<link rel=icon type=image/png sizes=16x16 href=https://CrazyCollin.github.io/favicon-16x16.png>
+<link rel=icon type=image/png sizes=32x32 href=https://CrazyCollin.github.io/favicon-32x32.png>
+<link rel=apple-touch-icon href=https://CrazyCollin.github.io/apple-touch-icon.png>
+<link rel=mask-icon href=https://CrazyCollin.github.io/safari-pinned-tab.svg>
+<meta name=theme-color content="#2e2e33">
+<meta name=msapplication-TileColor content="#2e2e33">
+<noscript>
+<style>#theme-toggle,.top-link{display:none}</style>
+<style>@media(prefers-color-scheme:dark){:root{--theme:rgb(29, 30, 32);--entry:rgb(46, 46, 51);--primary:rgb(218, 218, 219);--secondary:rgb(155, 156, 157);--tertiary:rgb(65, 66, 68);--content:rgb(196, 196, 197);--hljs-bg:rgb(46, 46, 51);--code-bg:rgb(55, 56, 62);--border:rgb(51, 51, 51)}.list{background:var(--theme)}.list:not(.dark)::-webkit-scrollbar-track{background:0 0}.list:not(.dark)::-webkit-scrollbar-thumb{border-color:var(--theme)}}</style>
+</noscript>
+<script type=application/javascript>var doNotTrack=!1;doNotTrack||(function(a,e,f,g,b,c,d){a.GoogleAnalyticsObject=b,a[b]=a[b]||function(){(a[b].q=a[b].q||[]).push(arguments)},a[b].l=1*new Date,c=e.createElement(f),d=e.getElementsByTagName(f)[0],c.async=1,c.src=g,d.parentNode.insertBefore(c,d)}(window,document,'script','https://www.google-analytics.com/analytics.js','ga'),ga('create','UA-123-45','auto'),ga('send','pageview'))</script><meta property="og:title" content="Redis中的基本数据类型">
+<meta property="og:description" content="Redis中的基本数据类型 
+基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。
+**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型
+同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率
+
+键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对
+哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针
+
+哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接
+当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了
+对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。
+当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：
+ 为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间  对于哈希表1而言，作为下一次rehash时中的to区 
+渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略
+具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了
+进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小
+
+底层数据结构 
+SDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为
+对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含&#34;\0&#34;的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加 
+双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的
+
+压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销
+压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降
+所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的
+
+跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高
+具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位
+跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找
+跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层
+1 2 3 4 5 6 7 8 9 10 11 12 13 14  typedef struct zskiplistNode { //Zset 对象的元素值  sds ele; //元素权重值  double score; //后向指针  struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度  struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode;   同时对于整个跳表的数据结构，如下">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://CrazyCollin.github.io/posts/redis%E4%B8%AD%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%95%B0%E6%8D%AE%E7%B1%BB%E5%9E%8B/"><meta property="og:image" content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E"><meta property="article:section" content="posts">
+<meta property="article:published_time" content="2022-05-11T22:47:24+08:00">
+<meta property="article:modified_time" content="2022-05-11T22:47:24+08:00"><meta property="og:site_name" content="ExampleSite">
+<meta name=twitter:card content="summary_large_image">
+<meta name=twitter:image content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E">
+<meta name=twitter:title content="Redis中的基本数据类型">
+<meta name=twitter:description content="Redis中的基本数据类型 
+基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。
+**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型
+同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率
+
+键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对
+哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针
+
+哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接
+当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了
+对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。
+当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：
+ 为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间  对于哈希表1而言，作为下一次rehash时中的to区 
+渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略
+具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了
+进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小
+
+底层数据结构 
+SDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为
+对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含&#34;\0&#34;的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加 
+双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的
+
+压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销
+压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降
+所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的
+
+跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高
+具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位
+跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找
+跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层
+1 2 3 4 5 6 7 8 9 10 11 12 13 14  typedef struct zskiplistNode { //Zset 对象的元素值  sds ele; //元素权重值  double score; //后向指针  struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度  struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode;   同时对于整个跳表的数据结构，如下">
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":2,"name":"Posts","item":"https://CrazyCollin.github.io/posts/"},{"@type":"ListItem","position":3,"name":"Redis中的基本数据类型","item":"https://CrazyCollin.github.io/posts/redis%E4%B8%AD%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%95%B0%E6%8D%AE%E7%B1%BB%E5%9E%8B/"}]}</script>
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BlogPosting","headline":"Redis中的基本数据类型","name":"Redis中的基本数据类型","description":"Redis中的基本数据类型 \n基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。\n**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型\n同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率\n\n键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对\n哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针\n\n哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接\n当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了\n对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。\n当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：\n 为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间  对于哈希表1而言，作为下一次rehash时中的to区 \n渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略\n具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了\n进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小\n\n底层数据结构 \nSDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为\n对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含\u0026quot;\\0\u0026quot;的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加 \n双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的\n\n压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销\n压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降\n所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的\n\n跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高\n具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位\n跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找\n跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层\n1 2 3 4 5 6 7 8 9 10 11 12 13 14  typedef struct zskiplistNode { //Zset 对象的元素值  sds ele; //元素权重值  double score; //后向指针  struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度  struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode;   同时对于整个跳表的数据结构，如下","keywords":["Redis"],"articleBody":"\nRedis中的基本数据类型 \n基本介绍 redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。\n**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型\n同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率\n\n键和值的结构组织方式 对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对\n哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针\n\n哈希冲突 对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接\n当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了\n对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。\n当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：\n 为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数 把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中 释放哈希表1的空间  对于哈希表1而言，作为下一次rehash时中的to区 \n渐进式rehash 当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了渐进式rehash的策略\n具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了\n进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小\n\n底层数据结构 \nSDS 对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为\n对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含\"\\0\"的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加 \n双向链表 redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的\n\n压缩列表 压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是针对不同长度的数据，采用不同的编码，有效的节省内存开销\n压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降\n所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的\n\n跳表 有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高\n具体来说，跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位\n跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找\n跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层\n1 2 3 4 5 6 7 8 9 10 11 12 13 14  typedef struct zskiplistNode { //Zset 对象的元素值  sds ele; //元素权重值  double score; //后向指针  struct zskiplistNode *backward; //节点的level数组，保存每层上的前向指针和跨度  struct zskiplistLevel { struct zskiplistNode *forward; unsigned long span; } level[]; } zskiplistNode;   同时对于整个跳表的数据结构，如下\n1 2 3 4 5  typedef struct zskiplist { struct zskiplistNode *header, *tail; unsigned long length; int level; } zskiplist;   包括了跳表的头尾节点，跳表的长度和跳表的层数\n\n跳表查询过程 \n跳表节点层数设置 \n整形数组 本质上其实就是一块连续的内存空间，元素数量或数据量不大的情况下用整形数组\n整形数组还有一种升级策略，具体就是当新加入的元素类型比之前数组中保存的元素类型要大的情况下，比如int64和int32这种情况，元素的类型会进行再转换为高阶类型，这样的好处就是在数据占用量不大的情况下节省内存空间 \n数据结构的时间复杂度 ","wordCount":"108","inLanguage":"en","datePublished":"2022-05-11T22:47:24+08:00","dateModified":"2022-05-11T22:47:24+08:00","author":[{"@type":"Person","name":"Collin"}],"mainEntityOfPage":{"@type":"WebPage","@id":"https://CrazyCollin.github.io/posts/redis%E4%B8%AD%E7%9A%84%E5%9F%BA%E6%9C%AC%E6%95%B0%E6%8D%AE%E7%B1%BB%E5%9E%8B/"},"publisher":{"@type":"Organization","name":"Collin's Blog","logo":{"@type":"ImageObject","url":"https://CrazyCollin.github.io/static/favicon.ico"}}}</script>
+</head>
+<body id=top>
+<script>localStorage.getItem("pref-theme")==="dark"?document.body.classList.add('dark'):localStorage.getItem("pref-theme")==="light"?document.body.classList.remove('dark'):window.matchMedia('(prefers-color-scheme: dark)').matches&&document.body.classList.add('dark')</script>
+<header class=header>
+<nav class=nav>
+<div class=logo>
+<a href=https://CrazyCollin.github.io accesskey=h title="Collin's Blog (Alt + H)">Collin's Blog</a>
+<span class=logo-switches>
+<button id=theme-toggle accesskey=t title="(Alt + T)"><svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg><svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
+</span>
+</div>
+<ul id=menu>
+<li>
+<a href=https://CrazyCollin.github.io/posts/ title=posts>
+<span>posts</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/categories/ title=categories>
+<span>categories</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/tags/ title=tags>
+<span>tags</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/archives/ title=archives>
+<span>archives</span>
+</a>
+</li>
+</ul>
+</nav>
+</header>
+<main class=main>
+<article class=post-single>
+<header class=post-header>
+<div class=breadcrumbs><a href=https://CrazyCollin.github.io>Home</a>&nbsp;»&nbsp;<a href=https://CrazyCollin.github.io/posts/>Posts</a></div>
+<h1 class=post-title>
+Redis中的基本数据类型
+</h1>
+<div class=post-meta><span title="2022-05-11 22:47:24 +0800 CST">May 11, 2022</span>&nbsp;·&nbsp;Collin&nbsp;|&nbsp;<a href=https://github.com/%3cpath_to_repo%3e/content/posts/redis%e4%b8%ad%e7%9a%84%e5%9f%ba%e6%9c%ac%e6%95%b0%e6%8d%ae%e7%b1%bb%e5%9e%8b.md rel="noopener noreferrer" target=_blank>Suggest Changes</a>
+</div>
+</header> <div class=toc>
+<details open>
+<summary accesskey=c title="(Alt + C)">
+<span class=details>Table of Contents</span>
+</summary>
+<div class=inner><ul>
+<li>
+<a href=#redis%e4%b8%ad%e7%9a%84%e5%9f%ba%e6%9c%ac%e6%95%b0%e6%8d%ae%e7%b1%bb%e5%9e%8b aria-label=Redis中的基本数据类型>Redis中的基本数据类型</a><ul>
+<li>
+<a href=#%e5%9f%ba%e6%9c%ac%e4%bb%8b%e7%bb%8d aria-label=基本介绍>基本介绍</a></li>
+<li>
+<a href=#%e9%94%ae%e5%92%8c%e5%80%bc%e7%9a%84%e7%bb%93%e6%9e%84%e7%bb%84%e7%bb%87%e6%96%b9%e5%bc%8f aria-label=键和值的结构组织方式>键和值的结构组织方式</a></li>
+<li>
+<a href=#%e5%93%88%e5%b8%8c%e5%86%b2%e7%aa%81 aria-label=哈希冲突>哈希冲突</a><ul>
+<li>
+<a href=#%e6%b8%90%e8%bf%9b%e5%bc%8frehash aria-label=渐进式rehash>渐进式rehash</a></li></ul>
+</li>
+<li>
+<a href=#%e5%ba%95%e5%b1%82%e6%95%b0%e6%8d%ae%e7%bb%93%e6%9e%84 aria-label=底层数据结构>底层数据结构</a><ul>
+<li>
+<a href=#sds aria-label=SDS>SDS</a></li>
+<li>
+<a href=#%e5%8f%8c%e5%90%91%e9%93%be%e8%a1%a8 aria-label=双向链表>双向链表</a></li>
+<li>
+<a href=#%e5%8e%8b%e7%bc%a9%e5%88%97%e8%a1%a8 aria-label=压缩列表>压缩列表</a></li>
+<li>
+<a href=#%e8%b7%b3%e8%a1%a8 aria-label=跳表>跳表</a><ul>
+<li>
+<a href=#%e8%b7%b3%e8%a1%a8%e6%9f%a5%e8%af%a2%e8%bf%87%e7%a8%8b aria-label=跳表查询过程>跳表查询过程</a></li>
+<li>
+<a href=#%e8%b7%b3%e8%a1%a8%e8%8a%82%e7%82%b9%e5%b1%82%e6%95%b0%e8%ae%be%e7%bd%ae aria-label=跳表节点层数设置>跳表节点层数设置</a></li></ul>
+</li>
+<li>
+<a href=#%e6%95%b4%e5%bd%a2%e6%95%b0%e7%bb%84 aria-label=整形数组>整形数组</a></li>
+<li>
+<a href=#%e6%95%b0%e6%8d%ae%e7%bb%93%e6%9e%84%e7%9a%84%e6%97%b6%e9%97%b4%e5%a4%8d%e6%9d%82%e5%ba%a6 aria-label=数据结构的时间复杂度>数据结构的时间复杂度</a>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</details>
+</div>
+<div class=post-content><p><a name=Wd8Oq></a></p>
+<h1 id=redis中的基本数据类型>Redis中的基本数据类型<a hidden class=anchor aria-hidden=true href=#redis中的基本数据类型>#</a></h1>
+<p><a name=o7YJZ></a></p>
+<h2 id=基本介绍>基本介绍<a hidden class=anchor aria-hidden=true href=#基本介绍>#</a></h2>
+<p>redis包含五种键值对值的数据类型，分别是：**String，List，Hash，Sorted Set，Set。<br>**对于键值对中的键，都是String类型的，因为redis是k-v数据库，所以整体而言数据的保存形式就相当于在一张大的哈希表中存储，值存储各种数据类型</p>
+<p>同时对于字符串而言，只有字符串的底层数据结构是只有一种SDS，其他的都包含两种数据结构，主要体现为在不同情况下转换底层的数据结构以提高存储效率<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/ECYUH5.png alt=image.png>
+<a name=NidzL></a></p>
+<h2 id=键和值的结构组织方式>键和值的结构组织方式<a hidden class=anchor aria-hidden=true href=#键和值的结构组织方式>#</a></h2>
+<p>对于redis而言，为了实现从键到值的快速访问，redis使用了一张全局哈希表来保存所有的键值对<br>哈希表其实就是一个数组，数组中的每一个元素都称为哈希桶，每个哈希桶都保存了键值对数据，哈希桶中的元素保存的实际上是指向具体值的指针</p>
+<p><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/cGqikb.png alt=image.png>
+<a name=HmFHw></a></p>
+<h2 id=哈希冲突>哈希冲突<a hidden class=anchor aria-hidden=true href=#哈希冲突>#</a></h2>
+<p>对于越来越多的键值对的存储，特定长度的数组在哈希存储时必然会出现哈希冲突，即多个entry同时映射到同一个数组索引上，对于这种现象，<strong>redis采用了链式哈希的办法来将entry同时存储在同一个数组索引上面，即后面加入的entry接在前面的entry上，他们之间以链表的形式进行链接</strong></p>
+<p><strong>当然越来越多的entry在同一个哈希表索引上时，对于链上靠后的entry的查询时间复杂度就会上升，这时候redis就会重新对所有的entry进行rehash扩容，类比于java中的hashmap，当然hashmap还会对链表进行转红黑树操作，这就有所不同了</strong></p>
+<p><strong>对于rehash而言，redis默认采用了两个全局哈希表，我们将之命名为哈希表1和哈希表2。</strong><br><strong>当一开始插入数据时，默认使用哈希表1，当数据开始增多之后，redis开始进行rehash操作，主要分为三部操作：</strong></p>
+<ul>
+<li><strong>为哈希表2分配更大的空间，通常是2倍，以容纳哈希表1rehash后的entry数</strong></li>
+<li><strong>把哈希表1中的数据重新映射rehash并拷贝到哈希表2当中</strong></li>
+<li><strong>释放哈希表1的空间</strong></li>
+</ul>
+<p><strong>对于哈希表1而言，作为下一次rehash时中的to区</strong>
+<a name=ZkhCk></a></p>
+<h3 id=渐进式rehash>渐进式rehash<a hidden class=anchor aria-hidden=true href=#渐进式rehash>#</a></h3>
+<p>当然对于上面那种rehash而言，假如enrty数量过多的话，rehash的时长必然非常的长，造成无法响应其他请求，对于这种情况redis采用了<strong>渐进式rehash</strong>的策略</p>
+<p><strong>具体渐进式rehash的操作步骤主要是将对enrty的rehash计算分摊至每个请求当中，比如说在处理第一个请求的时候，同时将哈希表1中索引为0的全部entry进行rehash，处理第二个请求的时候将索引为1的全部entry进行rehash，这样就不必一次全部rehash了，同时也能够响应客户端的请求了</strong></p>
+<p><strong>进行rehash的出发条件就是负载因子，就是哈希表已保存节点数量/哈希表大小</strong></p>
+<p><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/lpqrxE.png alt=image.png>
+<a name=k7CRp></a></p>
+<h2 id=底层数据结构>底层数据结构<a hidden class=anchor aria-hidden=true href=#底层数据结构>#</a></h2>
+<p><a name=shKIz></a></p>
+<h3 id=sds>SDS<a hidden class=anchor aria-hidden=true href=#sds>#</a></h3>
+<p>对于redis中的string数据类型，底层是简单动态字符串，其相比较于c原生的char数组而言，自封装了一个结构体用于承载字符串，具体表现为<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/94At5J.png alt=image.png>
+<br>对于c原生字符串，SDS的好处就是能够直接获取字符串长度，直接进行预分配，不用担心是否数据溢出，同时其保存的数据是二进制安全的，可以存储包含"\0"的数据，当对字符串进行修改时也是安全的，其会先计算预留的空间，假如不足直接扩容，充足则直接分配追加
+<a name=HGA0c></a></p>
+<h3 id=双向链表>双向链表<a hidden class=anchor aria-hidden=true href=#双向链表>#</a></h3>
+<p>redis自封装了一个listNode用于承载链表节点，封装一个list用于存储头尾节点以及相关信息（长度等），但同时链表需要保存前后节点，内存开销变大，同时链表节点不连续，对元素是进行逐个访问的<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/vJvCsK.png alt=image.png>
+<a name=s0huQ></a></p>
+<h3 id=压缩列表>压缩列表<a hidden class=anchor aria-hidden=true href=#压缩列表>#</a></h3>
+<p>压缩列表是一种内存紧凑类型的数据结构，占用一块连续的内存空间，其特点就是<strong>针对不同长度的数据，采用不同的编码，有效的节省内存开销</strong><br>压缩列表保存较多数据的时候查询效率会降低，同时新增或者修改某个元素的话，压缩列表占用的内存空间就需要重新分配，这可能会造成连锁反应，导致后面的压缩列表一并重新分配内存，造成访问压缩列表性能的下降<br>所以对于压缩列表而言，适合保存数据量或者节点数量不太多的场景，这样进行连锁更新的成本也是可以接受的<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/1Lt284.png alt=image.png>
+<a name=czrFV></a></p>
+<h3 id=跳表>跳表<a hidden class=anchor aria-hidden=true href=#跳表>#</a></h3>
+<p>有序链表一般只能够逐一查找元素，这样的操作非常缓慢，对于跳表来说，查询效率更高<br>具体来说，<strong>跳表就是在链表的基础上，增加了多级索引，实现一种多层的有序链表，通过多个索引之间的跳转，完成数据的快速定位</strong></p>
+<p><strong>跳表节点（zskiplistNode）同时保存元素和元素的权重值（score），每一个跳表节点都有一个后向指针，指向前一个节点，目的是为了方便从跳表的尾节点开始访问节点，方便倒序查找</strong></p>
+<p><strong>跳表是一个带有层级关系的链表，每一层可包含多个节点，每个节点之间通过指针连接起来具体就是通过跳表节点中的level数组，level数组的每一个元素都代表着跳表的一层</strong></p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 2
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 3
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 4
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 5
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 6
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 7
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 8
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272"> 9
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">10
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">11
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">12
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">13
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">14
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-c data-lang=c><span style=color:#fff;font-weight:700>typedef</span> <span style=color:#fff;font-weight:700>struct</span> zskiplistNode {
+    <span style=color:#007f7f>//Zset 对象的元素值
+</span><span style=color:#007f7f></span>    sds ele;
+    <span style=color:#007f7f>//元素权重值
+</span><span style=color:#007f7f></span>    <span style=color:#fff;font-weight:700>double</span> score;
+    <span style=color:#007f7f>//后向指针
+</span><span style=color:#007f7f></span>    <span style=color:#fff;font-weight:700>struct</span> zskiplistNode *backward;
+  
+    <span style=color:#007f7f>//节点的level数组，保存每层上的前向指针和跨度
+</span><span style=color:#007f7f></span>    <span style=color:#fff;font-weight:700>struct</span> zskiplistLevel {
+        <span style=color:#fff;font-weight:700>struct</span> zskiplistNode *forward;
+        <span style=color:#fff;font-weight:700>unsigned</span> <span style=color:#fff;font-weight:700>long</span> span;
+    } level[];
+} zskiplistNode;
+</code></pre></td></tr></table>
+</div>
+</div><p>同时对于整个跳表的数据结构，如下</p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272">1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">2
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">3
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">4
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">5
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-c data-lang=c><span style=color:#fff;font-weight:700>typedef</span> <span style=color:#fff;font-weight:700>struct</span> zskiplist {
+    <span style=color:#fff;font-weight:700>struct</span> zskiplistNode *header, *tail;
+    <span style=color:#fff;font-weight:700>unsigned</span> <span style=color:#fff;font-weight:700>long</span> length;
+    <span style=color:#fff;font-weight:700>int</span> level;
+} zskiplist;
+</code></pre></td></tr></table>
+</div>
+</div><p>包括了跳表的头尾节点，跳表的长度和跳表的层数<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/4omOSQ.png alt=image.png>
+<a name=LGQqy></a></p>
+<h4 id=跳表查询过程>跳表查询过程<a hidden class=anchor aria-hidden=true href=#跳表查询过程>#</a></h4>
+<p><a name=ynXYE></a></p>
+<h4 id=跳表节点层数设置>跳表节点层数设置<a hidden class=anchor aria-hidden=true href=#跳表节点层数设置>#</a></h4>
+<p><a name=rlJyn></a></p>
+<h3 id=整形数组>整形数组<a hidden class=anchor aria-hidden=true href=#整形数组>#</a></h3>
+<p>本质上其实就是一块连续的内存空间，元素数量或数据量不大的情况下用整形数组<br>整形数组还有一种升级策略，具体就是当新加入的元素类型比之前数组中保存的元素类型要大的情况下，比如int64和int32这种情况，元素的类型会进行再转换为高阶类型，这样的好处就是在数据占用量不大的情况下节省内存空间
+<a name=jGC0J></a></p>
+<h3 id=数据结构的时间复杂度>数据结构的时间复杂度<a hidden class=anchor aria-hidden=true href=#数据结构的时间复杂度>#</a></h3>
+<p><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/Eb4hL6.png alt=image.png>
+</p>
+</div>
+<footer class=post-footer>
+<ul class=post-tags>
+<li><a href=https://CrazyCollin.github.io/tags/redis/>Redis</a></li>
+</ul>
+<nav class=paginav>
+<a class=next href=https://CrazyCollin.github.io/posts/io%E7%BD%91%E7%BB%9C%E6%A8%A1%E5%9E%8B/>
+<span class=title>Next Page »</span>
+<br>
+<span>IO网络模型</span>
+</a>
+</nav>
+</footer>
+</article>
+</main>
+<footer class=footer>
+<span>&copy; 2022 <a href=https://CrazyCollin.github.io>Collin's Blog</a></span>
+<span>
+Powered by
+<a href=https://gohugo.io/ rel="noopener noreferrer" target=_blank>Hugo</a> &
+        <a href=https://git.io/hugopapermod rel=noopener target=_blank>PaperMod</a>
+</span>
+</footer>
+<a href=#top aria-label="go to top" title="Go to Top (Alt + G)" class=top-link id=top-link accesskey=g><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentcolor"><path d="M12 6H0l6-6z"/></svg>
+</a>
+<script>let menu=document.getElementById('menu');menu&&(menu.scrollLeft=localStorage.getItem("menu-scroll-position"),menu.onscroll=function(){localStorage.setItem("menu-scroll-position",menu.scrollLeft)}),document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener("click",function(b){b.preventDefault();var a=this.getAttribute("href").substr(1);window.matchMedia('(prefers-reduced-motion: reduce)').matches?document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView():document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView({behavior:"smooth"}),a==="top"?history.replaceState(null,null," "):history.pushState(null,null,`#${a}`)})})</script>
+<script>var mybutton=document.getElementById("top-link");window.onscroll=function(){document.body.scrollTop>800||document.documentElement.scrollTop>800?(mybutton.style.visibility="visible",mybutton.style.opacity="1"):(mybutton.style.visibility="hidden",mybutton.style.opacity="0")}</script>
+<script>document.getElementById("theme-toggle").addEventListener("click",()=>{document.body.className.includes("dark")?(document.body.classList.remove('dark'),localStorage.setItem("pref-theme",'light')):(document.body.classList.add('dark'),localStorage.setItem("pref-theme",'dark'))})</script>
+</body>
+</html>
