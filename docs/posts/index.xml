@@ -9,7 +9,25 @@
       <link>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</link>
     </image>
     <generator>Hugo -- gohugo.io</generator>
-    <lastBuildDate>Thu, 12 May 2022 22:12:12 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
+    <lastBuildDate>Sat, 14 May 2022 23:02:21 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>简单的分布式缓存设计</title>
+      <link>https://CrazyCollin.github.io/posts/%E7%AE%80%E5%8D%95%E7%9A%84%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98%E8%AE%BE%E8%AE%A1/</link>
+      <pubDate>Sat, 14 May 2022 23:02:21 +0800</pubDate>
+      
+      <guid>https://CrazyCollin.github.io/posts/%E7%AE%80%E5%8D%95%E7%9A%84%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98%E8%AE%BE%E8%AE%A1/</guid>
+      <description>简单的分布式缓存设计 
+简单介绍 groupcache是一个k-v键值对缓存，也是memcache的go版本。groupcache不像其他缓存数据库是C/S架构，每一个节点都是一个客户端或者是服务端。当本地节点在缓存中查找不到对应的数据之后，会先通过一致性哈希办法从其他peer节点获取对应缓存数据，假如也没有查找到缓存数据，则直接通过回调函数在本地获取对应缓存数据并将其放入缓存中
+同时对于节点本地缓存的管理部分，并没有删除，采用了LRU算法用于处理超过缓冲区大小的缓存
+对于节点之间的通信，采取http的方式进行缓存数据的传送
+在这里设计了一个mini版的groupcache，对groupcache大部分精髓部分都进行模仿
+
+查询缓存流程 
+交互逻辑 整体的交互逻辑设置在Group部分，由Group负责对底层缓存的获取，Group是一个缓存的命名空间，拥有唯一命名空间，在Group中包含了对远程Peer节点的获取缓存的接口，本地获取数据的回调函数以及并发处理的策略
+1 2 3 4 5 6 7 8 9 10 11 12  type Group struct { //缓存空间命名 	name string //缓存未命中时进行回调获取数据 	getter Getter //缓存 	mainCache cache //远程数据获取接口 	peers PeerPicker //并发处理请求策略 	loader *singleflight.Group }   主要是获取缓存的逻辑，先在本地缓存中获取，其次通过一致性哈希调用远程节点，最后才本地回调处理
+1 2 3 4 5 6 7 8 9 10 11  //本地调用策略 func (g *Group) Get(key string) (ByteView, error) { if key == &amp;#34;&amp;#34; { return ByteView{}, fmt.</description>
+    </item>
+    
     <item>
       <title>说说Redis中的持久化</title>
       <link>https://CrazyCollin.github.io/posts/%E8%AF%B4%E8%AF%B4redis%E4%B8%AD%E7%9A%84%E6%8C%81%E4%B9%85%E5%8C%96/</link>
