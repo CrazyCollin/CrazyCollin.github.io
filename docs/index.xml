@@ -9,7 +9,30 @@
       <link>https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E</link>
     </image>
     <generator>Hugo -- gohugo.io</generator>
-    <lastBuildDate>Sat, 14 May 2022 23:02:21 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/index.xml" rel="self" type="application/rss+xml" />
+    <lastBuildDate>Sun, 22 May 2022 18:08:54 +0800</lastBuildDate><atom:link href="https://CrazyCollin.github.io/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Deep Dive Into Message Chunking in Pulsar</title>
+      <link>https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/</link>
+      <pubDate>Sun, 22 May 2022 18:08:54 +0800</pubDate>
+      
+      <guid>https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/</guid>
+      <description>深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ 
+消息拆分的原理 
+单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。
+消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 
+单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.
+broker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 
+多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。
+这张图片就是一个很好的例子。生产者1
+ Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性
+ 
+如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。
+这里有几个实用消息分块的限制：
+ topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。
+1 2 3 4 5  Producer&amp;lt;byte[]&amp;gt; producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：
+1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：</description>
+    </item>
+    
     <item>
       <title>简单的分布式缓存设计</title>
       <link>https://CrazyCollin.github.io/posts/%E7%AE%80%E5%8D%95%E7%9A%84%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98%E8%AE%BE%E8%AE%A1/</link>

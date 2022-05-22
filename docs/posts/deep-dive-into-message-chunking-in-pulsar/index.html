@@ -1,0 +1,346 @@
+<!doctype html><html lang=en dir=auto>
+<head><meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge">
+<meta name=viewport content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name=robots content="index, follow">
+<title>Deep Dive Into Message Chunking in Pulsar | Collin's Blog</title>
+<meta name=keywords content="消息队列">
+<meta name=description content="深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ 
+消息拆分的原理 
+单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。
+消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 
+单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.
+broker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 
+多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。
+这张图片就是一个很好的例子。生产者1
+ Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性
+ 
+如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。
+这里有几个实用消息分块的限制：
+ topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。
+1 2 3 4 5  Producer<byte[]> producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：
+1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：">
+<meta name=author content="Collin">
+<link rel=canonical href=https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/>
+<link crossorigin=anonymous href=/assets/css/stylesheet.min.ec8da366ca2fb647537ccb7a8f6fa5b4e9cd3c7a0d3171dd2d3baad1e49c8bfc.css integrity="sha256-7I2jZsovtkdTfMt6j2+ltOnNPHoNMXHdLTuq0eSci/w=" rel="preload stylesheet" as=style>
+<script defer crossorigin=anonymous src=/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5+kdJvBz5iKbt6B5PJI=" onload=hljs.initHighlightingOnLoad()></script>
+<link rel=icon href=https://CrazyCollin.github.io/static/favicon.ico>
+<link rel=icon type=image/png sizes=16x16 href=https://CrazyCollin.github.io/favicon-16x16.png>
+<link rel=icon type=image/png sizes=32x32 href=https://CrazyCollin.github.io/favicon-32x32.png>
+<link rel=apple-touch-icon href=https://CrazyCollin.github.io/apple-touch-icon.png>
+<link rel=mask-icon href=https://CrazyCollin.github.io/safari-pinned-tab.svg>
+<meta name=theme-color content="#2e2e33">
+<meta name=msapplication-TileColor content="#2e2e33">
+<noscript>
+<style>#theme-toggle,.top-link{display:none}</style>
+<style>@media(prefers-color-scheme:dark){:root{--theme:rgb(29, 30, 32);--entry:rgb(46, 46, 51);--primary:rgb(218, 218, 219);--secondary:rgb(155, 156, 157);--tertiary:rgb(65, 66, 68);--content:rgb(196, 196, 197);--hljs-bg:rgb(46, 46, 51);--code-bg:rgb(55, 56, 62);--border:rgb(51, 51, 51)}.list{background:var(--theme)}.list:not(.dark)::-webkit-scrollbar-track{background:0 0}.list:not(.dark)::-webkit-scrollbar-thumb{border-color:var(--theme)}}</style>
+</noscript>
+<script type=application/javascript>var doNotTrack=!1;doNotTrack||(function(a,e,f,g,b,c,d){a.GoogleAnalyticsObject=b,a[b]=a[b]||function(){(a[b].q=a[b].q||[]).push(arguments)},a[b].l=1*new Date,c=e.createElement(f),d=e.getElementsByTagName(f)[0],c.async=1,c.src=g,d.parentNode.insertBefore(c,d)}(window,document,'script','https://www.google-analytics.com/analytics.js','ga'),ga('create','UA-123-45','auto'),ga('send','pageview'))</script><meta property="og:title" content="Deep Dive Into Message Chunking in Pulsar">
+<meta property="og:description" content="深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ 
+消息拆分的原理 
+单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。
+消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 
+单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.
+broker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 
+多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。
+这张图片就是一个很好的例子。生产者1
+ Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性
+ 
+如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。
+这里有几个实用消息分块的限制：
+ topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。
+1 2 3 4 5  Producer<byte[]> producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：
+1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/"><meta property="og:image" content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E"><meta property="article:section" content="posts">
+<meta property="article:published_time" content="2022-05-22T18:08:54+08:00">
+<meta property="article:modified_time" content="2022-05-22T18:08:54+08:00"><meta property="og:site_name" content="ExampleSite">
+<meta name=twitter:card content="summary_large_image">
+<meta name=twitter:image content="https://CrazyCollin.github.io/%3Clink%20or%20path%20of%20image%20for%20opengraph,%20twitter-cards%3E">
+<meta name=twitter:title content="Deep Dive Into Message Chunking in Pulsar">
+<meta name=twitter:description content="深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ 
+消息拆分的原理 
+单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。
+消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 
+单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.
+broker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 
+多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。
+这张图片就是一个很好的例子。生产者1
+ Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性
+ 
+如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。
+这里有几个实用消息分块的限制：
+ topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。
+1 2 3 4 5  Producer<byte[]> producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：
+1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：">
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":2,"name":"Posts","item":"https://CrazyCollin.github.io/posts/"},{"@type":"ListItem","position":3,"name":"Deep Dive Into Message Chunking in Pulsar","item":"https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/"}]}</script>
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"BlogPosting","headline":"Deep Dive Into Message Chunking in Pulsar","name":"Deep Dive Into Message Chunking in Pulsar","description":"深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ \n消息拆分的原理 \n单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。\n消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 \n单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.\nbroker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 \n多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。\n这张图片就是一个很好的例子。生产者1\n Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性\n \n如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。\n这里有几个实用消息分块的限制：\n topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。\n1 2 3 4 5  Producer\u0026lt;byte[]\u0026gt; producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：\n1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：","keywords":["消息队列"],"articleBody":"\n深入理解Pulsar的大消息拆分 此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/ \n消息拆分的原理 \n单生产者发送分块消息至单topic 当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。\n消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。 \n单生产者混合发送普通消息和分块消息至单topic 如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.\nbroker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。 \n多生产者并发发送分块消息至单topic Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。\n这张图片就是一个很好的例子。生产者1\n Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见Large Message Size Handling in Pulsar: Chunking for Shared Subscription这个issue以讨论这个特性\n \n如何启用消息分块 消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。\n这里有几个实用消息分块的限制：\n topic必须是持久化topic 在生产者中消息分块不能同时和批量处理选项同时开启 订阅类型必须是独占型或者是灾备型的  下面是一个怎么在创建生产者时开启消息分块的示例。\n1 2 3 4 5  Producerbyte[] producer = pulsarClient.newProducer() .topic(topic) .enableChunking(true) .enableBatching(false) .create();   然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：\n1 2  byte[] data = new byte[10 * 1024 * 1024]; producer.send(data);   你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：\n1 2 3 4 5 6 7  Consumerbyte[] consumer = pulsarClient.newConsumer() .topic(topic) .subscriptionName(\"test\") .subscribe(); Messagebyte[] msg = consumer.receive(); consumer.acknowledge(msg);   \n如何实现消息分块 这个部分深入消息分块的实现。首先让我们看一下和分块消息相关的结构和属性。然后我们会了解产生和消费分块消息的整个过程。\n从下面展示的来看，在消息元数据中有四个属性和分块消息相关。生产者和消费者都共用这些属性\n1 2 3 4  optional string uuid; optional int32 num_chunks_from_msg; optional int32 total_chunk_msg_size; optional int32 chunk_id;    uuid用来唯一的标识整个chunk message。在整个chunk message中的每一个分块中的uuid都是相等的。我们可以用这种方法了解一条消息究竟是属于哪一条chunk message。 num_chunks_from_msg是表示chunk message中的分块数量。整个chunk message中的每个分块的num_chunks_from_msg都是一样的。 total_chunk_msg_size表示整个chunk message负载大小。整个chunk message中的每个分块的total_chunk_msg_size都是一样的。 chunk_id用来标记当前消息的特殊部分（？）。   拆分chunked messages 让我们先来看看生产者端的消息分块功能实现。在客户端和broker成功建立连接之后，broker将消息最大值maxMessageSize通过序列化proto命令CommandConnected传输给客户端。这是一个可选属性，默认值为5MB。\n当生产者发送消息的时候，它会当前消息的负载大小是否已经超过之前broker传给自己的maxMessageSize。加入消息已经超过大小限制，那么大消息就会被切分。比如一条承载信息大小为12mb的信息就会被切分为以下三块。\n\n推送chunked messages 当大消息被分块，生产者将每一个分块当作普通的消息发给broker。每一个分块就像普通的消息一样，同样受到了broker的流量控制和客户端的内存限制。在生产者配置中有一个maxPendingMessages参数来限制了生产者能够同时发送消息的最大数量。每一个分块在maxPendingMessages中都被单独的计数。这意味着发送一个包括三个分块的大消息会占用生产者中等待发送消息的位置。（？）\n每当发送一个分块，就有一个单独的OpSendMsg为了每个分块而创造出来。每个OpSendMsg共享着同一个用来返回给用户的分块message ID的ChunkMessageCtx上下文。每个分块同样在自己的消息元数据中共享同一个uuid。\n生产者按顺序将每个分块发给broker，并且broker按序接收。这保证了当最后一个分块的推送被确认后整个chunk message的成功发送。这同样保证了chunk message的所有分块消息在topic中按序存放。消费者依赖这个顺序来保证消费分块时的有序。\n对于一个有着分区的topic，生产者直接将大消息中的所有分块推送到同一个分区当中。 \nchunked message ID 在pulsar中，当一个普通消息被推送或者被消费掉时，它的message ID将被返回它的用户。对于chunk message而言，pulsar是如何将message ID返回给它的用户的呢？ \n在Pulsar2.10.0版本之前的chunk message ID 在pulsar2.10.0之前，生产者或者消费者只返回最后一个分块的message ID作为整个chunk message的message ID。这个实现在有时候会引发问题。举个例子，当我们用这个message ID来寻找的时候，消费者会从最后一个分块的位置中开始消费。那么这个消费者就会错误的认为前面的分块已经丢失并且会选择跳过当前的消息。如果我们广泛的搜索，那么消费者很有可能跳过某些消息，这也会导致一些不可预期的事情发生。\n从图中我们可以知道，消费者将最后一个分块的消息作为chunk message的message ID返回给用户。如果用户用这个message ID来做一个泛查询，在broker的视角来看，消费者是在找M1-C3.根据泛查询的语意来看，在查询后第一个被消费者消费的消息应该是M1。但实际上，第一个进入消费者的消息是M1-C3。消费者会发现它并没有收到chunk message前面的分块部分，并且不能够继续接受之前的分块，所以它会直接抛弃M1。因此，实际上被消费的第一个消息是M2.这是一个预料之外的事情。 \n在Pulsar2.10.0版本及之后的chunk message ID 为了解决这个问题，pulsar在2.10.0之后引入了chunk message ID。PIP107详细阐述了这个特性。chunk message ID和原来的行为保存一致，以实现与原始逻辑的兼容。chunk message ID包含两个普通的message ID：第一个分块和最后一个分块的message ID。生产者和消费者都用chunk message上下文来生成chunk message ID。\n从图中可见，当生产者收到每一个分块的推送确认的时候获得第一个分块和最后一个分块的message ID。生产者将其缓存在chunk message上下文当中，并且在收到最后一个分块的message ID后生成chunk message ID。对于消费者来说也是同样一个过程。区别就是消费者通过接收消息来获取message ID。\nchunk message ID功能不仅解决了seeking情况下导致的问题，而且还允许你获取关于chunk message更多的信息。 \n组合chunked messages 消费者需要在消息交付给应用之前将所有的分块重新整合成原始消息。消费者使用chunk message上下文来缓存所有的分块数据，比如说负载数据，元数据和消息ID这种。当处理分块消息的时候，消费者会假定分块被按序接收并且在分块乱序的情况下将所有的分块丢弃。\n假设我们推送了两个大消息，“abc”和“de”。它们在topic中等待被消费。mexMessageSize被设置为1byte的大小，这导致了每个分块负载信息也比较小。\n当消费者消费第一个消息的时候，它发现这是一个chunk message（主要是从元数据中取chunk sizes），紧接着创建一个ChunkedMessageCtx上下文。uuid唯一标识chunk message，以便我们只当将分块置于哪一个chunk message上下文中。上下文中的lastChunkedMessageId表示最后收到的分块ID。每当消费者收到新块时，这个值都将被更新。上下文中的负载信息也就是整个chunk message负载信息的当前缓存值。这个在消费者接收分块时会一直保持增长（像下图所示）。\n像上图所示一样，当消费者全部收到了uuid为1的chunk message的所有分块时，它就能够用chunked message上下文生成原始消息，也就是生产者端的大消息。这个完整的消息随后被移交给应用并且消费者释放上下文。值得注意的是在这个阶段因为我们已经收到一个uuid为2的chunk message的分块，第二个chunked message上下文也因此在消费者中创建。\n就像之前的例子一样，当消费者收到了uuid为2的全部分块，它就会从chunked message上下文中生成一条新消息，也就是大消息，并把这个完整的消息移交给应用。 \nchunked messages的最佳实践 在这个部分，我们来分享一些使用消息分块的最佳实践 \n不要在消息中设置过大的元数据 \n在主题级别的maxMessageSize限制 \n消费者的最佳实践 \ndebugging的最佳实践 \n \n \n ","wordCount":"190","inLanguage":"en","datePublished":"2022-05-22T18:08:54+08:00","dateModified":"2022-05-22T18:08:54+08:00","author":[{"@type":"Person","name":"Collin"}],"mainEntityOfPage":{"@type":"WebPage","@id":"https://CrazyCollin.github.io/posts/deep-dive-into-message-chunking-in-pulsar/"},"publisher":{"@type":"Organization","name":"Collin's Blog","logo":{"@type":"ImageObject","url":"https://CrazyCollin.github.io/static/favicon.ico"}}}</script>
+</head>
+<body id=top>
+<script>localStorage.getItem("pref-theme")==="dark"?document.body.classList.add('dark'):localStorage.getItem("pref-theme")==="light"?document.body.classList.remove('dark'):window.matchMedia('(prefers-color-scheme: dark)').matches&&document.body.classList.add('dark')</script>
+<header class=header>
+<nav class=nav>
+<div class=logo>
+<a href=https://CrazyCollin.github.io accesskey=h title="Collin's Blog (Alt + H)">Collin's Blog</a>
+<span class=logo-switches>
+<button id=theme-toggle accesskey=t title="(Alt + T)"><svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg><svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentcolor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
+</span>
+</div>
+<ul id=menu>
+<li>
+<a href=https://CrazyCollin.github.io/posts/ title=posts>
+<span>posts</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/categories/ title=categories>
+<span>categories</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/tags/ title=tags>
+<span>tags</span>
+</a>
+</li>
+<li>
+<a href=https://CrazyCollin.github.io/archives/ title=archives>
+<span>archives</span>
+</a>
+</li>
+</ul>
+</nav>
+</header>
+<main class=main>
+<article class=post-single>
+<header class=post-header>
+<div class=breadcrumbs><a href=https://CrazyCollin.github.io>Home</a>&nbsp;»&nbsp;<a href=https://CrazyCollin.github.io/posts/>Posts</a></div>
+<h1 class=post-title>
+Deep Dive Into Message Chunking in Pulsar
+</h1>
+<div class=post-meta><span title="2022-05-22 18:08:54 +0800 CST">May 22, 2022</span>&nbsp;·&nbsp;Collin&nbsp;|&nbsp;<a href=https://github.com/%3cpath_to_repo%3e/content/posts/deep-dive-into-message-chunking-in-pulsar.md rel="noopener noreferrer" target=_blank>Suggest Changes</a>
+</div>
+</header> <div class=toc>
+<details open>
+<summary accesskey=c title="(Alt + C)">
+<span class=details>Table of Contents</span>
+</summary>
+<div class=inner><ul>
+<li>
+<a href=#%e6%b7%b1%e5%85%a5%e7%90%86%e8%a7%a3pulsar%e7%9a%84%e5%a4%a7%e6%b6%88%e6%81%af%e6%8b%86%e5%88%86 aria-label=深入理解Pulsar的大消息拆分>深入理解Pulsar的大消息拆分</a><ul>
+<li>
+<a href=#%e6%b6%88%e6%81%af%e6%8b%86%e5%88%86%e7%9a%84%e5%8e%9f%e7%90%86 aria-label=消息拆分的原理>消息拆分的原理</a><ul>
+<li>
+<a href=#%e5%8d%95%e7%94%9f%e4%ba%a7%e8%80%85%e5%8f%91%e9%80%81%e5%88%86%e5%9d%97%e6%b6%88%e6%81%af%e8%87%b3%e5%8d%95topic aria-label=单生产者发送分块消息至单topic>单生产者发送分块消息至单topic</a></li>
+<li>
+<a href=#%e5%8d%95%e7%94%9f%e4%ba%a7%e8%80%85%e6%b7%b7%e5%90%88%e5%8f%91%e9%80%81%e6%99%ae%e9%80%9a%e6%b6%88%e6%81%af%e5%92%8c%e5%88%86%e5%9d%97%e6%b6%88%e6%81%af%e8%87%b3%e5%8d%95topic aria-label=单生产者混合发送普通消息和分块消息至单topic>单生产者混合发送普通消息和分块消息至单topic</a></li>
+<li>
+<a href=#%e5%a4%9a%e7%94%9f%e4%ba%a7%e8%80%85%e5%b9%b6%e5%8f%91%e5%8f%91%e9%80%81%e5%88%86%e5%9d%97%e6%b6%88%e6%81%af%e8%87%b3%e5%8d%95topic aria-label=多生产者并发发送分块消息至单topic>多生产者并发发送分块消息至单topic</a></li></ul>
+</li>
+<li>
+<a href=#%e5%a6%82%e4%bd%95%e5%90%af%e7%94%a8%e6%b6%88%e6%81%af%e5%88%86%e5%9d%97 aria-label=如何启用消息分块>如何启用消息分块</a></li>
+<li>
+<a href=#%e5%a6%82%e4%bd%95%e5%ae%9e%e7%8e%b0%e6%b6%88%e6%81%af%e5%88%86%e5%9d%97 aria-label=如何实现消息分块>如何实现消息分块</a><ul>
+<li>
+<a href=#%e6%8b%86%e5%88%86chunked-messages aria-label="拆分chunked messages">拆分chunked messages</a></li>
+<li>
+<a href=#%e6%8e%a8%e9%80%81chunked-messages aria-label="推送chunked messages">推送chunked messages</a></li>
+<li>
+<a href=#chunked-message-id aria-label="chunked message ID">chunked message ID</a><ul>
+<li>
+<a href=#%e5%9c%a8pulsar2100%e7%89%88%e6%9c%ac%e4%b9%8b%e5%89%8d%e7%9a%84chunk-message-id aria-label="在Pulsar2.10.0版本之前的chunk message ID">在Pulsar2.10.0版本之前的chunk message ID</a></li>
+<li>
+<a href=#%e5%9c%a8pulsar2100%e7%89%88%e6%9c%ac%e5%8f%8a%e4%b9%8b%e5%90%8e%e7%9a%84chunk-message-id aria-label="在Pulsar2.10.0版本及之后的chunk message ID">在Pulsar2.10.0版本及之后的chunk message ID</a></li></ul>
+</li>
+<li>
+<a href=#%e7%bb%84%e5%90%88chunked-messages aria-label="组合chunked messages">组合chunked messages</a></li></ul>
+</li>
+<li>
+<a href=#chunked-messages%e7%9a%84%e6%9c%80%e4%bd%b3%e5%ae%9e%e8%b7%b5 aria-label="chunked messages的最佳实践">chunked messages的最佳实践</a><ul>
+<li>
+<a href=#%e4%b8%8d%e8%a6%81%e5%9c%a8%e6%b6%88%e6%81%af%e4%b8%ad%e8%ae%be%e7%bd%ae%e8%bf%87%e5%a4%a7%e7%9a%84%e5%85%83%e6%95%b0%e6%8d%ae aria-label=不要在消息中设置过大的元数据>不要在消息中设置过大的元数据</a></li>
+<li>
+<a href=#%e5%9c%a8%e4%b8%bb%e9%a2%98%e7%ba%a7%e5%88%ab%e7%9a%84maxmessagesize%e9%99%90%e5%88%b6 aria-label=在主题级别的maxMessageSize限制>在主题级别的maxMessageSize限制</a></li>
+<li>
+<a href=#%e6%b6%88%e8%b4%b9%e8%80%85%e7%9a%84%e6%9c%80%e4%bd%b3%e5%ae%9e%e8%b7%b5 aria-label=消费者的最佳实践>消费者的最佳实践</a></li>
+<li>
+<a href=#debugging%e7%9a%84%e6%9c%80%e4%bd%b3%e5%ae%9e%e8%b7%b5 aria-label=debugging的最佳实践>debugging的最佳实践</a>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</details>
+</div>
+<div class=post-content><p><a name=EdAqi></a></p>
+<h1 id=深入理解pulsar的大消息拆分>深入理解Pulsar的大消息拆分<a hidden class=anchor aria-hidden=true href=#深入理解pulsar的大消息拆分>#</a></h1>
+<p>此篇文章是杨子棵导师关于大消息拆分的博客的个人自行翻译理解部分，原文请见：<a href=https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/>https://streamnative.io/blog/engineering/2022-05-10-deep-dive-into-message-chunking-in-pulsar/</a>
+<a name=KZMFV></a></p>
+<h2 id=消息拆分的原理>消息拆分的原理<a hidden class=anchor aria-hidden=true href=#消息拆分的原理>#</a></h2>
+<p><a name=BYB4O></a></p>
+<h3 id=单生产者发送分块消息至单topic>单生产者发送分块消息至单topic<a hidden class=anchor aria-hidden=true href=#单生产者发送分块消息至单topic>#</a></h3>
+<p><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/EMIs8m.png alt=image.png>
+<br>当消息拆分选项启动的时候，假如生产者收到从用户收到大消息并且这个大消息大小大于broker传来的maxMessageSize的时候，生产者会把这个消息进行拆分。如图所示，消息M被拆分为：M-C1，M-C2，M-C3。生产者保证每个分块的消息大小不超过maxMessageSize，并且按序将分块消息发出去。<br>消费者在全部分块到达之前首先将这些分块全部缓存起来，然后消费者会将分块拼接起来，消费消息，并把它移交给应用。
+<a name=ktQ7H></a></p>
+<h3 id=单生产者混合发送普通消息和分块消息至单topic>单生产者混合发送普通消息和分块消息至单topic<a hidden class=anchor aria-hidden=true href=#单生产者混合发送普通消息和分块消息至单topic>#</a></h3>
+<p><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/WG1PGQ.png alt=image.png>
+<br>如图所示，消息M1被分为三个普通的消息：M1-C1，M1-C2和M1-C3。消息M2同样被分为两个普通的消息：M2-C1和M2-C2。在topic中同样有两个不是分块的消息：M3和M4.<br>broker将这些消息都存储在topic中，并且按照同样的顺序向消费者分发。消费者能够判断到来的消息是否为分块消息。在接收到分块消息之后，消费者在接收所有的分块信息之前会在内存中将分块信息缓存起来。然后消费者把这些分块信息拼接成一条信息，大消息的信息负载也被移交给应用处理。
+<a name=fc30l></a></p>
+<h3 id=多生产者并发发送分块消息至单topic>多生产者并发发送分块消息至单topic<a hidden class=anchor aria-hidden=true href=#多生产者并发发送分块消息至单topic>#</a></h3>
+<p>Pulsar允许多个生产者向单个topic中同时发送消息。broker将来自不同生产者的分块信息存储在同一个topic中。当多个生产者同时向同一个topic发送分块消息的时候，broker将来自不同生产者的分块消息交织存储在同一个topic中。这些分块仍然是有顺序的，只不过可能在topic中不是严格连续的。这给消费者端带来了一定的内存压力，因为消费者需要把每条大消息的分块消息分开来缓存。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/3N4C8s.png alt=image.png>
+<br>这张图片就是一个很好的例子。生产者1</p>
+<blockquote>
+<p>Note：在所有讨论的例子中，只有一个消费者同时从一个topic中消费信息。简单来说，就是对于消费者的订阅类型必须是独占或者是灾备型的。目前Pulsar并不支持共享型或者是key共享型的订阅类型。请参见<a href=https://github.com/apache/pulsar/issues/7645>Large Message Size Handling in Pulsar: Chunking for Shared Subscription</a>这个issue以讨论这个特性</p>
+</blockquote>
+<p><a name=xNB5u></a></p>
+<h2 id=如何启用消息分块>如何启用消息分块<a hidden class=anchor aria-hidden=true href=#如何启用消息分块>#</a></h2>
+<p>消息分块默认是关闭的。你如果想使用这项特性那就需要在创建生产者的时候就启动message chunking选项。<br>这里有几个实用消息分块的限制：</p>
+<ul>
+<li>topic必须是持久化topic</li>
+<li>在生产者中消息分块不能同时和批量处理选项同时开启</li>
+<li>订阅类型必须是独占型或者是灾备型的</li>
+</ul>
+<p>下面是一个怎么在创建生产者时开启消息分块的示例。</p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272">1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">2
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">3
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">4
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">5
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-java data-lang=java>Producer&lt;<span style=color:#fff;font-weight:700>byte</span>[]&gt; producer = pulsarClient.<span style=color:#007f7f>newProducer</span>()
+       .<span style=color:#007f7f>topic</span>(topic)
+       .<span style=color:#007f7f>enableChunking</span>(<span style=color:#fff;font-weight:700>true</span>)
+       .<span style=color:#007f7f>enableBatching</span>(<span style=color:#fff;font-weight:700>false</span>)
+       .<span style=color:#007f7f>create</span>();
+</code></pre></td></tr></table>
+</div>
+</div><p>然后你就可以和下面的一样用这个生产者来发送负载大容量信息的消息了：</p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272">1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">2
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-java data-lang=java><span style=color:#fff;font-weight:700>byte</span>[] data = <span style=color:#fff;font-weight:700>new</span> <span style=color:#fff;font-weight:700>byte</span>[10 * 1024 * 1024];
+producer.<span style=color:#007f7f>send</span>(data);
+</code></pre></td></tr></table>
+</div>
+</div><p>你同样可以像下面的一样创建一个消费者来消费和确认负载大容量信息的消息：</p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272">1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">2
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">3
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">4
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">5
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">6
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">7
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-java data-lang=java>Consumer&lt;<span style=color:#fff;font-weight:700>byte</span>[]&gt; consumer = pulsarClient.<span style=color:#007f7f>newConsumer</span>()
+       .<span style=color:#007f7f>topic</span>(topic)
+       .<span style=color:#007f7f>subscriptionName</span>(<span style=color:#0ff;font-weight:700>&#34;test&#34;</span>)
+       .<span style=color:#007f7f>subscribe</span>();
+
+Message&lt;<span style=color:#fff;font-weight:700>byte</span>[]&gt; msg = consumer.<span style=color:#007f7f>receive</span>();
+consumer.<span style=color:#007f7f>acknowledge</span>(msg);
+</code></pre></td></tr></table>
+</div>
+</div><p><a name=EfI8I></a></p>
+<h2 id=如何实现消息分块>如何实现消息分块<a hidden class=anchor aria-hidden=true href=#如何实现消息分块>#</a></h2>
+<p>这个部分深入消息分块的实现。首先让我们看一下和分块消息相关的结构和属性。然后我们会了解产生和消费分块消息的整个过程。<br>从下面展示的来看，在消息元数据中有四个属性和分块消息相关。生产者和消费者都共用这些属性</p>
+<div class=highlight><div style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4>
+<table style=border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block><tr><td style=vertical-align:top;padding:0;margin:0;border:0>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code><span style="margin-right:.4em;padding:0 .4em;color:#727272">1
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">2
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">3
+</span><span style="margin-right:.4em;padding:0 .4em;color:#727272">4
+</span></code></pre></td>
+<td style=vertical-align:top;padding:0;margin:0;border:0;width:100%>
+<pre tabindex=0 style=color:#e5e5e5;background-color:#000;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-java data-lang=java>optional string uuid;
+optional int32 num_chunks_from_msg;
+optional int32 total_chunk_msg_size; 
+optional int32 chunk_id;
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li><strong>uuid</strong>用来唯一的标识整个chunk message。在整个chunk message中的每一个分块中的uuid都是相等的。我们可以用这种方法了解一条消息究竟是属于哪一条chunk message。</li>
+<li><strong>num_chunks_from_msg</strong>是表示chunk message中的分块数量。整个chunk message中的每个分块的<strong>num_chunks_from_msg</strong>都是一样的。</li>
+<li><strong>total_chunk_msg_size</strong>表示整个chunk message负载大小。整个chunk message中的每个分块的<strong>total_chunk_msg_size</strong>都是一样的。</li>
+<li><strong>chunk_id</strong>用来标记当前消息的特殊部分（？）。
+<a name=qzWKE></a></li>
+</ol>
+<h3 id=拆分chunked-messages>拆分chunked messages<a hidden class=anchor aria-hidden=true href=#拆分chunked-messages>#</a></h3>
+<p>让我们先来看看生产者端的消息分块功能实现。在客户端和broker成功建立连接之后，broker将消息最大值maxMessageSize通过序列化proto命令CommandConnected传输给客户端。这是一个可选属性，默认值为5MB。<br>当生产者发送消息的时候，它会当前消息的负载大小是否已经超过之前broker传给自己的maxMessageSize。加入消息已经超过大小限制，那么大消息就会被切分。比如一条承载信息大小为12mb的信息就会被切分为以下三块。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/L2R7hm.png alt=image.png>
+<a name=euwAc></a></p>
+<h3 id=推送chunked-messages>推送chunked messages<a hidden class=anchor aria-hidden=true href=#推送chunked-messages>#</a></h3>
+<p>当大消息被分块，生产者将每一个分块当作普通的消息发给broker。每一个分块就像普通的消息一样，同样受到了broker的流量控制和客户端的内存限制。在生产者配置中有一个maxPendingMessages参数来限制了生产者能够同时发送消息的最大数量。每一个分块在maxPendingMessages中都被单独的计数。这意味着发送一个包括三个分块的大消息会占用生产者中等待发送消息的位置。（？）<br>每当发送一个分块，就有一个单独的OpSendMsg为了每个分块而创造出来。每个OpSendMsg共享着同一个用来返回给用户的分块message ID的ChunkMessageCtx上下文。每个分块同样在自己的消息元数据中共享同一个uuid。<br>生产者按顺序将每个分块发给broker，并且broker按序接收。这保证了当最后一个分块的推送被确认后整个chunk message的成功发送。这同样保证了chunk message的所有分块消息在topic中按序存放。消费者依赖这个顺序来保证消费分块时的有序。<br>对于一个有着分区的topic，生产者直接将大消息中的所有分块推送到同一个分区当中。
+<a name=mAKOo></a></p>
+<h3 id=chunked-message-id>chunked message ID<a hidden class=anchor aria-hidden=true href=#chunked-message-id>#</a></h3>
+<p>在pulsar中，当一个普通消息被推送或者被消费掉时，它的message ID将被返回它的用户。对于chunk message而言，pulsar是如何将message ID返回给它的用户的呢？
+<a name=YKU0B></a></p>
+<h4 id=在pulsar2100版本之前的chunk-message-id>在Pulsar2.10.0版本之前的chunk message ID<a hidden class=anchor aria-hidden=true href=#在pulsar2100版本之前的chunk-message-id>#</a></h4>
+<p>在pulsar2.10.0之前，生产者或者消费者只返回最后一个分块的message ID作为整个chunk message的message ID。这个实现在有时候会引发问题。举个例子，当我们用这个message ID来寻找的时候，消费者会从最后一个分块的位置中开始消费。那么这个消费者就会错误的认为前面的分块已经丢失并且会选择跳过当前的消息。如果我们广泛的搜索，那么消费者很有可能跳过某些消息，这也会导致一些不可预期的事情发生。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/ZNJ5UD.png alt=image.png>
+<br>从图中我们可以知道，消费者将最后一个分块的消息作为chunk message的message ID返回给用户。如果用户用这个message ID来做一个泛查询，在broker的视角来看，消费者是在找M1-C3.根据泛查询的语意来看，在查询后第一个被消费者消费的消息应该是M1。但实际上，第一个进入消费者的消息是M1-C3。消费者会发现它并没有收到chunk message前面的分块部分，并且不能够继续接受之前的分块，所以它会直接抛弃M1。因此，实际上被消费的第一个消息是M2.这是一个预料之外的事情。
+<a name=ouAAD></a></p>
+<h4 id=在pulsar2100版本及之后的chunk-message-id>在Pulsar2.10.0版本及之后的chunk message ID<a hidden class=anchor aria-hidden=true href=#在pulsar2100版本及之后的chunk-message-id>#</a></h4>
+<p>为了解决这个问题，pulsar在2.10.0之后引入了chunk message ID。PIP107详细阐述了这个特性。chunk message ID和原来的行为保存一致，以实现与原始逻辑的兼容。chunk message ID包含两个普通的message ID：第一个分块和最后一个分块的message ID。生产者和消费者都用chunk message上下文来生成chunk message ID。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/HXtvMz.png alt=image.png>
+<br>从图中可见，当生产者收到每一个分块的推送确认的时候获得第一个分块和最后一个分块的message ID。生产者将其缓存在chunk message上下文当中，并且在收到最后一个分块的message ID后生成chunk message ID。对于消费者来说也是同样一个过程。区别就是消费者通过接收消息来获取message ID。<br>chunk message ID功能不仅解决了seeking情况下导致的问题，而且还允许你获取关于chunk message更多的信息。
+<a name=kJf7s></a></p>
+<h3 id=组合chunked-messages>组合chunked messages<a hidden class=anchor aria-hidden=true href=#组合chunked-messages>#</a></h3>
+<p>消费者需要在消息交付给应用之前将所有的分块重新整合成原始消息。消费者使用chunk message上下文来缓存所有的分块数据，比如说负载数据，元数据和消息ID这种。当处理分块消息的时候，消费者会假定分块被按序接收并且在分块乱序的情况下将所有的分块丢弃。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/5Dtc4E.png alt=image.png>
+<br>假设我们推送了两个大消息，“abc”和“de”。它们在topic中等待被消费。mexMessageSize被设置为1byte的大小，这导致了每个分块负载信息也比较小。<br>当消费者消费第一个消息的时候，它发现这是一个chunk message（主要是从元数据中取chunk sizes），紧接着创建一个ChunkedMessageCtx上下文。uuid唯一标识chunk message，以便我们只当将分块置于哪一个chunk message上下文中。上下文中的lastChunkedMessageId表示最后收到的分块ID。每当消费者收到新块时，这个值都将被更新。上下文中的负载信息也就是整个chunk message负载信息的当前缓存值。这个在消费者接收分块时会一直保持增长（像下图所示）。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/5qekrd.png alt=image.png>
+<br>像上图所示一样，当消费者全部收到了uuid为1的chunk message的所有分块时，它就能够用chunked message上下文生成原始消息，也就是生产者端的大消息。这个完整的消息随后被移交给应用并且消费者释放上下文。值得注意的是在这个阶段因为我们已经收到一个uuid为2的chunk message的分块，第二个chunked message上下文也因此在消费者中创建。<br><img loading=lazy src=https://cdn.jsdelivr.net/gh/CrazyCollin/image@master/uPic/cyBQwk.png alt=image.png>
+<br>就像之前的例子一样，当消费者收到了uuid为2的全部分块，它就会从chunked message上下文中生成一条新消息，也就是大消息，并把这个完整的消息移交给应用。
+<a name=olxfd></a></p>
+<h2 id=chunked-messages的最佳实践>chunked messages的最佳实践<a hidden class=anchor aria-hidden=true href=#chunked-messages的最佳实践>#</a></h2>
+<p>在这个部分，我们来分享一些使用消息分块的最佳实践
+<a name=PVXSJ></a></p>
+<h3 id=不要在消息中设置过大的元数据>不要在消息中设置过大的元数据<a hidden class=anchor aria-hidden=true href=#不要在消息中设置过大的元数据>#</a></h3>
+<p><a name=rPjrd></a></p>
+<h3 id=在主题级别的maxmessagesize限制>在主题级别的maxMessageSize限制<a hidden class=anchor aria-hidden=true href=#在主题级别的maxmessagesize限制>#</a></h3>
+<p><a name=ooB8J></a></p>
+<h3 id=消费者的最佳实践>消费者的最佳实践<a hidden class=anchor aria-hidden=true href=#消费者的最佳实践>#</a></h3>
+<p><a name=psOpM></a></p>
+<h3 id=debugging的最佳实践>debugging的最佳实践<a hidden class=anchor aria-hidden=true href=#debugging的最佳实践>#</a></h3>
+<p><a name=D4HXT></a></p>
+<h3 id=heading><a hidden class=anchor aria-hidden=true href=#heading>#</a></h3>
+<p><a name=zRSAe></a></p>
+<h3 id=heading-1><a hidden class=anchor aria-hidden=true href=#heading-1>#</a></h3>
+<p><a name=U1Xl3></a></p>
+<h2 id=heading-2><a hidden class=anchor aria-hidden=true href=#heading-2>#</a></h2>
+</div>
+<footer class=post-footer>
+<ul class=post-tags>
+<li><a href=https://CrazyCollin.github.io/tags/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/>消息队列</a></li>
+</ul>
+<nav class=paginav>
+<a class=next href=https://CrazyCollin.github.io/posts/%E7%AE%80%E5%8D%95%E7%9A%84%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98%E8%AE%BE%E8%AE%A1/>
+<span class=title>Next Page »</span>
+<br>
+<span>简单的分布式缓存设计</span>
+</a>
+</nav>
+</footer>
+</article>
+</main>
+<footer class=footer>
+<span>&copy; 2022 <a href=https://CrazyCollin.github.io>Collin's Blog</a></span>
+<span>
+Powered by
+<a href=https://gohugo.io/ rel="noopener noreferrer" target=_blank>Hugo</a> &
+        <a href=https://git.io/hugopapermod rel=noopener target=_blank>PaperMod</a>
+</span>
+</footer>
+<a href=#top aria-label="go to top" title="Go to Top (Alt + G)" class=top-link id=top-link accesskey=g><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentcolor"><path d="M12 6H0l6-6z"/></svg>
+</a>
+<script>let menu=document.getElementById('menu');menu&&(menu.scrollLeft=localStorage.getItem("menu-scroll-position"),menu.onscroll=function(){localStorage.setItem("menu-scroll-position",menu.scrollLeft)}),document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener("click",function(b){b.preventDefault();var a=this.getAttribute("href").substr(1);window.matchMedia('(prefers-reduced-motion: reduce)').matches?document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView():document.querySelector(`[id='${decodeURIComponent(a)}']`).scrollIntoView({behavior:"smooth"}),a==="top"?history.replaceState(null,null," "):history.pushState(null,null,`#${a}`)})})</script>
+<script>var mybutton=document.getElementById("top-link");window.onscroll=function(){document.body.scrollTop>800||document.documentElement.scrollTop>800?(mybutton.style.visibility="visible",mybutton.style.opacity="1"):(mybutton.style.visibility="hidden",mybutton.style.opacity="0")}</script>
+<script>document.getElementById("theme-toggle").addEventListener("click",()=>{document.body.className.includes("dark")?(document.body.classList.remove('dark'),localStorage.setItem("pref-theme",'light')):(document.body.classList.add('dark'),localStorage.setItem("pref-theme",'dark'))})</script>
+</body>
+</html>
