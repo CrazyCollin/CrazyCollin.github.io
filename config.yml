@@ -1,7 +1,7 @@
 baseURL: "https://CrazyCollin.github.io"
 title: Collin's Blog
 paginate: 5
-theme: PaperMod
+theme: hugo-xmin
 
 enableRobotsTXT: true
 buildDrafts: false
@@ -146,10 +146,10 @@ menu:
 #           #   name: 🏖记录生活
 #           #   url: posts/life
 #           #   weight: 6
-    - identifier: archives
-      name: archives
-      url: /archives/
-      weight: 20
+    # - identifier: archives
+    #   name: archives
+    #   url: /archives/
+    #   weight: 20
 #           - identifier: categories
 #             name: 分类
 #             url: categories
